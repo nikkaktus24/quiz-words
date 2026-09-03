@@ -1,4 +1,4 @@
-import { db, type Card, type Deck, type User } from "./db";
+import { all, get, insertId, run, type Card, type Deck, type User } from "./db";
 import { extractWordsFromImage, generateCards } from "./ai";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -61,24 +61,23 @@ Bun.serve({
         if (!username || username.length < 2) return bad("Username must be at least 2 characters");
         if (username.length > 32) return bad("Username is too long");
 
-        const existing = db.query("SELECT * FROM users WHERE username = ?").get(username) as User | null;
+        const existing = await get<User>("SELECT * FROM users WHERE username = ?", [username]);
         if (existing) return json(existing);
 
-        db.run("INSERT INTO users (username) VALUES (?)", [username]);
-        const user = db.query("SELECT * FROM users WHERE username = ?").get(username) as User;
+        await run("INSERT INTO users (username) VALUES (?)", [username]);
+        const user = await get<User>("SELECT * FROM users WHERE username = ?", [username]);
         return json(user, 201);
       }
 
       if (method === "GET" && path.startsWith("/api/users/") && path.endsWith("/decks")) {
         const userId = Number(path.split("/")[3]);
-        const user = db.query("SELECT * FROM users WHERE id = ?").get(userId) as User | null;
+        const user = await get<User>("SELECT * FROM users WHERE id = ?", [userId]);
         if (!user) return json({ error: "User not found" }, 404);
-        const decks = db
-          .query(
-            `SELECT d.*, (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count
-             FROM decks d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
-          )
-          .all(userId) as Deck[];
+        const decks = await all<Deck>(
+          `SELECT d.*, (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count
+           FROM decks d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
+          [userId],
+        );
         return json({ user, decks });
       }
 
@@ -94,43 +93,39 @@ Bun.serve({
         if (!name) return bad("Deck name required");
         const sourceLang = (body.sourceLang || "auto").trim();
         const targetLang = (body.targetLang || "en").trim();
-        db.run("INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)", [
-          body.userId,
-          name,
-          sourceLang,
-          targetLang,
-        ]);
-        const deck = db.query("SELECT * FROM decks WHERE id = last_insert_rowid()").get() as Deck;
+        const id = await insertId(
+          "INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)",
+          [body.userId, name, sourceLang, targetLang],
+        );
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [id]);
         return json(deck, 201);
       }
 
       const deckMatch = path.match(/^\/api\/decks\/(\d+)$/);
       if (deckMatch && method === "GET") {
-        const deck = db.query("SELECT * FROM decks WHERE id = ?").get(Number(deckMatch[1])) as Deck | null;
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
         if (!deck) return notFound();
-        const cards = db
-          .query("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC")
-          .all(deck.id) as Card[];
+        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
         return json({ deck, cards });
       }
 
       if (deckMatch && method === "DELETE") {
-        db.run("DELETE FROM cards WHERE deck_id = ?", [Number(deckMatch[1])]);
-        db.run("DELETE FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        await run("DELETE FROM cards WHERE deck_id = ?", [Number(deckMatch[1])]);
+        await run("DELETE FROM decks WHERE id = ?", [Number(deckMatch[1])]);
         return json({ ok: true });
       }
 
       if (deckMatch && method === "PATCH") {
         const body = await readJson<{ name?: string; sourceLang?: string; targetLang?: string }>(req);
-        const deck = db.query("SELECT * FROM decks WHERE id = ?").get(Number(deckMatch[1])) as Deck | null;
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
         if (!deck) return notFound();
-        db.run("UPDATE decks SET name = ?, source_lang = ?, target_lang = ? WHERE id = ?", [
+        await run("UPDATE decks SET name = ?, source_lang = ?, target_lang = ? WHERE id = ?", [
           body.name?.trim() || deck.name,
           body.sourceLang || deck.source_lang,
           body.targetLang || deck.target_lang,
           deck.id,
         ]);
-        const updated = db.query("SELECT * FROM decks WHERE id = ?").get(deck.id) as Deck;
+        const updated = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
         return json(updated);
       }
 
@@ -149,7 +144,7 @@ Bun.serve({
 
       const generateMatch = path.match(/^\/api\/decks\/(\d+)\/generate$/);
       if (generateMatch && method === "POST") {
-        const deck = db.query("SELECT * FROM decks WHERE id = ?").get(Number(generateMatch[1])) as Deck | null;
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(generateMatch[1])]);
         if (!deck) return notFound();
         const body = await readJson<{ words?: string[] }>(req);
         const words = (body.words || []).map((w) => w.trim()).filter(Boolean);
@@ -160,32 +155,23 @@ Bun.serve({
           targetLang: deck.target_lang,
         });
         if (deck.source_lang === "auto" && generated.sourceLang && generated.sourceLang !== "und") {
-          db.run("UPDATE decks SET source_lang = ? WHERE id = ?", [generated.sourceLang, deck.id]);
+          await run("UPDATE decks SET source_lang = ? WHERE id = ?", [generated.sourceLang, deck.id]);
         }
-        const insert = db.prepare(
-          `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        );
         for (const card of generated.cards) {
-          insert.run(
-            deck.id,
-            card.word,
-            card.translation,
-            card.sentence,
-            card.sentenceTranslation,
-            card.notes,
+          await run(
+            `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [deck.id, card.word, card.translation, card.sentence, card.sentenceTranslation, card.notes],
           );
         }
-        const cards = db
-          .query("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC")
-          .all(deck.id) as Card[];
-        const updatedDeck = db.query("SELECT * FROM decks WHERE id = ?").get(deck.id) as Deck;
+        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+        const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
         return json({ deck: updatedDeck, cards, added: generated.cards.length });
       }
 
       const cardMatch = path.match(/^\/api\/cards\/(\d+)$/);
       if (cardMatch && method === "DELETE") {
-        db.run("DELETE FROM cards WHERE id = ?", [Number(cardMatch[1])]);
+        await run("DELETE FROM cards WHERE id = ?", [Number(cardMatch[1])]);
         return json({ ok: true });
       }
 
@@ -193,8 +179,8 @@ Bun.serve({
       if (reviewMatch && method === "POST") {
         const body = await readJson<{ known?: boolean }>(req);
         const field = body.known ? "known_count" : "unknown_count";
-        db.run(`UPDATE cards SET ${field} = ${field} + 1 WHERE id = ?`, [Number(reviewMatch[1])]);
-        const card = db.query("SELECT * FROM cards WHERE id = ?").get(Number(reviewMatch[1])) as Card | null;
+        await run(`UPDATE cards SET ${field} = ${field} + 1 WHERE id = ?`, [Number(reviewMatch[1])]);
+        const card = await get<Card>("SELECT * FROM cards WHERE id = ?", [Number(reviewMatch[1])]);
         if (!card) return notFound();
         return json(card);
       }

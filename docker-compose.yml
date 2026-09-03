@@ -1,18 +1,29 @@
 services:
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    environment:
+      SQLD_NODE: primary
+      SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+    volumes:
+      - libsql-data:/var/lib/sqld
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
   api:
-    image: ${REGISTRY:-docker.io}/${USERNAME:-local}/quiz-words-api:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-docker.io}/${DOCKER_USERNAME:-local}/quiz-words-api:${IMAGE_TAG:-latest}
     build:
       context: ./server
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
-      DATA_DIR: /data
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-    volumes:
-      - quiz-data:/data
+      LIBSQL_URL: http://libsql:8080
     expose:
       - "3000"
+    depends_on:
+      - libsql
     healthcheck:
       test:
         [
@@ -28,7 +39,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ${REGISTRY:-docker.io}/${USERNAME:-local}/quiz-words-web:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-docker.io}/${DOCKER_USERNAME:-local}/quiz-words-web:${IMAGE_TAG:-latest}
     build:
       context: ./web
     ports:
@@ -39,4 +50,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  quiz-data:
+  libsql-data:

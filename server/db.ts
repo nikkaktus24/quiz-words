@@ -1,16 +1,30 @@
-import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { createClient, type InValue, type ResultSet, type Row } from "@libsql/client";
 
 const dataDir = process.env.DATA_DIR || join(import.meta.dir, "..", "data");
-const dbPath = join(dataDir, "quiz.db");
-mkdirSync(dirname(dbPath), { recursive: true });
+mkdirSync(dataDir, { recursive: true });
 
-export const db = new Database(dbPath);
-db.exec("PRAGMA journal_mode = WAL;");
-db.exec("PRAGMA foreign_keys = ON;");
+const url = process.env.LIBSQL_URL || `file:${join(dataDir, "quiz.db")}`;
+const authToken = process.env.LIBSQL_AUTH_TOKEN || undefined;
 
-db.exec(`
+export const client = createClient({ url, authToken });
+
+async function waitForDb() {
+  let lastError: unknown;
+  for (let i = 0; i < 40; i++) {
+    try {
+      await client.execute("SELECT 1");
+      return;
+    } catch (err) {
+      lastError = err;
+      await Bun.sleep(250);
+    }
+  }
+  throw new Error(`Could not connect to libSQL at ${url}: ${lastError instanceof Error ? lastError.message : lastError}`);
+}
+
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL COLLATE NOCASE,
@@ -40,7 +54,42 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
   );
-`);
+`;
+
+await waitForDb();
+await client.execute("PRAGMA foreign_keys = ON");
+for (const statement of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) {
+  await client.execute(statement);
+}
+
+function mapRow<T>(rs: ResultSet, row: Row): T {
+  const obj: Record<string, unknown> = {};
+  for (const name of rs.columns) {
+    const value = row[name];
+    obj[name] = typeof value === "bigint" ? Number(value) : value;
+  }
+  return obj as T;
+}
+
+export async function get<T>(sql: string, args: InValue[] = []): Promise<T | null> {
+  const rs = await client.execute({ sql, args });
+  const row = rs.rows[0];
+  return row ? mapRow<T>(rs, row) : null;
+}
+
+export async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
+  const rs = await client.execute({ sql, args });
+  return rs.rows.map((row) => mapRow<T>(rs, row));
+}
+
+export async function run(sql: string, args: InValue[] = []): Promise<ResultSet> {
+  return client.execute({ sql, args });
+}
+
+export async function insertId(sql: string, args: InValue[] = []): Promise<number> {
+  const rs = await client.execute({ sql, args });
+  return Number(rs.lastInsertRowid);
+}
 
 export type User = { id: number; username: string; created_at: string };
 export type Deck = {
