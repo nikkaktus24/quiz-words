@@ -17,6 +17,7 @@ export function DeckPage() {
   const [busy, setBusy] = useState("");
   const [photoBusy, setPhotoBusy] = useState(false);
   const [info, setInfo] = useState("");
+  const [error, setError] = useState("");
   const [dedupeBusy, setDedupeBusy] = useState(false);
 
   useEffect(() => {
