@@ -36,6 +36,15 @@ App: http://localhost:8080
 libSQL HTTP: http://localhost:8081  
 Data is stored in the `libsql-data` volume.
 
+On Portainer, deploy **`docker-compose.stack.yml`** (images only, no `build:`). Set `DOCKER_USERNAME` and `OPENROUTER_API_KEY`.
+
+UI API location (runtime, no rebuild):
+
+- Leave `API_URL` empty → browser calls `/api` on the same host (nginx proxies to the `api` container)
+- Or set `API_URL` to the API origin the browser should use, e.g. `https://quiz.example.com:3000`
+
+Local Vite: `VITE_API_URL` in `.env`. If the UI origin differs from the API, set `WEB_ORIGIN` on the API (or `*` to allow the request origin).
+
 ## GitHub Actions
 
 The workflow does **not** run on push or pull request. Start it by hand: **Actions → CI → Run workflow**. That builds and pushes:

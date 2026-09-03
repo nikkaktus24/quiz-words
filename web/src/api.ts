@@ -1,7 +1,17 @@
 import type { Card, Deck, User } from "./types";
 
+function apiBase() {
+  const runtime = typeof window !== "undefined" ? window.__API_URL__ : "";
+  const fromEnv = import.meta.env.VITE_API_URL ?? "";
+  return String(runtime || fromEnv || "").replace(/\/$/, "");
+}
+
+function apiUrl(path: string) {
+  return `${apiBase()}${path}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  const res = await fetch(apiUrl(path), init);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);

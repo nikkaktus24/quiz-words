@@ -5,23 +5,28 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const ORIGIN = process.env.WEB_ORIGIN || "http://localhost:5173";
 
-function json(data: unknown, status = 200) {
+function allowOrigin(req?: Request) {
+  if (ORIGIN === "*") return req?.headers.get("Origin") || "*";
+  return ORIGIN;
+}
+
+function jsonBody(data: unknown, status = 200, req?: Request) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": ORIGIN,
+      "Access-Control-Allow-Origin": allowOrigin(req),
       "Access-Control-Allow-Headers": "Content-Type",
       "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     },
   });
 }
 
-function cors() {
+function cors(req: Request) {
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": ORIGIN,
+      "Access-Control-Allow-Origin": allowOrigin(req),
       "Access-Control-Allow-Headers": "Content-Type",
       "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     },
@@ -32,19 +37,15 @@ async function readJson<T>(req: Request): Promise<T> {
   return (await req.json()) as T;
 }
 
-function notFound() {
-  return json({ error: "Not found" }, 404);
-}
-
-function bad(message: string) {
-  return json({ error: message }, 400);
-}
-
 Bun.serve({
   port: PORT,
   hostname: HOST,
   async fetch(req) {
-    if (req.method === "OPTIONS") return cors();
+    if (req.method === "OPTIONS") return cors(req);
+
+    const json = (data: unknown, status = 200) => jsonBody(data, status, req);
+    const notFound = () => json({ error: "Not found" }, 404);
+    const bad = (message: string) => json({ error: message }, 400);
 
     const url = new URL(req.url);
     const path = url.pathname;

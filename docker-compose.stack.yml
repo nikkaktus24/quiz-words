@@ -1,3 +1,6 @@
+# Portainer / production: pull images only (no build context).
+# Set DOCKER_USERNAME (and OPENROUTER_API_KEY) in the stack env.
+
 services:
   libsql:
     image: ghcr.io/tursodatabase/libsql-server:latest
@@ -6,24 +9,22 @@ services:
       SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
     volumes:
       - libsql-data:/var/lib/sqld
-    ports:
-      - "8081:8080"
+    networks:
+      - quiz
     restart: unless-stopped
 
   api:
-    image: ${REGISTRY:-docker.io}/${DOCKER_USERNAME:-local}/quiz-words-api:${IMAGE_TAG:-latest}
-    build:
-      context: ./server
+    image: ${DOCKER_USERNAME}/quiz-words-api:${IMAGE_TAG:-latest}
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
       WEB_ORIGIN: ${WEB_ORIGIN:-*}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       LIBSQL_URL: http://libsql:8080
-    expose:
-      - "3000"
     depends_on:
       - libsql
+    networks:
+      - quiz
     healthcheck:
       test:
         [
@@ -35,21 +36,23 @@ services:
       interval: 10s
       timeout: 3s
       retries: 8
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
 
   web:
-    image: ${REGISTRY:-docker.io}/${DOCKER_USERNAME:-local}/quiz-words-web:${IMAGE_TAG:-latest}
-    build:
-      context: ./web
+    image: ${DOCKER_USERNAME}/quiz-words-web:${IMAGE_TAG:-latest}
     ports:
       - "8080:80"
     environment:
       API_URL: ${API_URL:-}
     depends_on:
-      api:
-        condition: service_healthy
+      - api
+    networks:
+      - quiz
     restart: unless-stopped
+
+networks:
+  quiz:
 
 volumes:
   libsql-data:
