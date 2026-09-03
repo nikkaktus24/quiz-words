@@ -37,9 +37,9 @@ SQLite is stored in the `quiz-data` volume.
 
 ## GitHub Actions
 
-`.github/workflows/ci.yml` runs on push and pull request: typecheck, web build, and Docker images.
+The workflow does **not** run on push or pull request. Start it by hand: **Actions → CI → Run workflow**. Check **Push Docker images to the registry** only when you want a publish.
 
-On push to `main`/`master` it also logs in and pushes:
+Images (when that box is checked):
 
 - `{registry}/{username}/quiz-words-api`
 - `{registry}/{username}/quiz-words-web`
@@ -51,6 +51,8 @@ Add these in the repo **Settings → Secrets and variables → Actions**:
 | `USERNAME` | Secret or variable | Registry username |
 | `PASSWORD` | Secret | Registry password or access token |
 | `REGISTRY` | Variable (optional) | Defaults to `docker.io` |
+
+Secrets stay on this repository. A public fork does not get `USERNAME`/`PASSWORD`, so fork CI cannot log in to your registry or push there. If someone runs Actions on their fork, they only push if they add their own credentials — those go to *their* account, not yours.
 
 Docker Hub example: `USERNAME` = hub user, `PASSWORD` = [access token](https://hub.docker.com/settings/security).  
 GHCR example: `REGISTRY` = `ghcr.io`, `USERNAME` = GitHub user, `PASSWORD` = PAT with `write:packages`.
