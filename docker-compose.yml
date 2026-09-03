@@ -1,0 +1,40 @@
+services:
+  api:
+    build:
+      context: ./server
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      DATA_DIR: /data
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    volumes:
+      - quiz-data:/data
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  quiz-data:

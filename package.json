@@ -1,0 +1,12 @@
+{
+  "name": "quiz-words",
+  "private": true,
+  "scripts": {
+    "dev": "bun run dev:api & bun run dev:web; wait",
+    "dev:api": "bun run --cwd server dev",
+    "dev:web": "bun run --cwd web dev",
+    "install:all": "bun install --cwd server && bun install --cwd web",
+    "typecheck": "bun run --cwd web typecheck",
+    "build": "bun run --cwd web build"
+  }
+}

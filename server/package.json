@@ -1,0 +1,11 @@
+{
+  "name": "quiz-words-api",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch --env-file=../.env index.ts",
+    "start": "bun index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
