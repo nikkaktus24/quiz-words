@@ -74,6 +74,11 @@ export const api = {
   deleteDeck(id: number) {
     return request<{ ok: boolean }>(`/api/decks/${id}`, { method: "DELETE" });
   },
+  dedupe(deckId: number) {
+    return request<{ deck: Deck; cards: Card[]; removed: number }>(`/api/decks/${deckId}/dedupe`, {
+      method: "POST",
+    });
+  },
   extractPhoto(deckId: number, file: File) {
     const form = new FormData();
     form.append("image", file);

@@ -17,7 +17,7 @@ export function DeckPage() {
   const [busy, setBusy] = useState("");
   const [photoBusy, setPhotoBusy] = useState(false);
   const [info, setInfo] = useState("");
-  const [error, setError] = useState("");
+  const [dedupeBusy, setDedupeBusy] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -87,6 +87,35 @@ export function DeckPage() {
     }
   }
 
+  async function removeDuplicates() {
+    const extra = duplicateCount(cards);
+    if (extra === 0) {
+      setInfo("No duplicate words in this deck.");
+      return;
+    }
+    if (!confirm(`Remove ${extra} duplicate card${extra === 1 ? "" : "s"}? The first copy of each word is kept.`)) {
+      return;
+    }
+    setDedupeBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const data = await api.dedupe(deckId);
+      setCards(data.cards);
+      setDeck(data.deck);
+      setInfo(
+        data.removed === 0
+          ? "No duplicate words in this deck."
+          : `Removed ${data.removed} duplicate card${data.removed === 1 ? "" : "s"}.`,
+      );
+    } catch (err) {
+      console.error("[quiz-words] dedupe failed", err);
+      setError(err instanceof Error ? err.message : "Could not remove duplicates");
+    } finally {
+      setDedupeBusy(false);
+    }
+  }
+
   async function removeDeck() {
     if (!confirm("Delete this deck?")) return;
     await api.deleteDeck(deckId);
@@ -120,6 +149,9 @@ export function DeckPage() {
           <Link className="pine" to={`/decks/${deck.id}/study?mode=write`}>
             Write
           </Link>
+          <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
+            {dedupeBusy ? "Checking…" : "Remove duplicates"}
+          </button>
           <button className="danger" onClick={removeDeck}>
             Delete
           </button>
@@ -205,4 +237,15 @@ export function DeckPage() {
       </div>
     </div>
   );
+}
+
+function duplicateCount(cards: Card[]) {
+  const seen = new Set<string>();
+  let extra = 0;
+  for (const card of cards) {
+    const key = card.word.trim().toLowerCase().replace(/\s+/g, " ");
+    if (seen.has(key)) extra += 1;
+    else seen.add(key);
+  }
+  return extra;
 }

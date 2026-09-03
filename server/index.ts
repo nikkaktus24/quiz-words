@@ -135,6 +135,37 @@ Bun.serve({
         return json(updated);
       }
 
+      const dedupeMatch = path.match(/^\/api\/decks\/(\d+)\/dedupe$/);
+      if (dedupeMatch && method === "POST") {
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(dedupeMatch[1])]);
+        if (!deck) return notFound();
+        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id ASC", [deck.id]);
+        const keep = new Map<string, Card>();
+        const removeIds: number[] = [];
+        for (const card of cards) {
+          const key = card.word.trim().toLowerCase().replace(/\s+/g, " ");
+          const current = keep.get(key);
+          if (!current) {
+            keep.set(key, card);
+            continue;
+          }
+          const currentScore = current.known_count + current.unknown_count;
+          const nextScore = card.known_count + card.unknown_count;
+          if (nextScore > currentScore) {
+            removeIds.push(current.id);
+            keep.set(key, card);
+          } else {
+            removeIds.push(card.id);
+          }
+        }
+        for (const id of removeIds) {
+          await run("DELETE FROM cards WHERE id = ?", [id]);
+        }
+        const remaining = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+        console.log("[quiz-words] dedupe", { deckId: deck.id, removed: removeIds.length });
+        return json({ deck, cards: remaining, removed: removeIds.length });
+      }
+
       const extractMatch = path.match(/^\/api\/decks\/(\d+)\/extract-photo$/);
       if (method === "POST" && extractMatch) {
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(extractMatch[1])]);
