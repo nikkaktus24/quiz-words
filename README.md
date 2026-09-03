@@ -33,17 +33,17 @@ docker compose up --build
 ```
 
 App: http://localhost:8080  
+API: http://localhost:3000  
 libSQL HTTP: http://localhost:8081  
 Data is stored in the `libsql-data` volume.
 
-On Portainer, deploy **`docker-compose.stack.yml`** (images only, no `build:`). Set `DOCKER_USERNAME` and `OPENROUTER_API_KEY`.
+Nginx only serves the UI. The browser calls the API using **`API_URL`** (not an nginx proxy). Local compose defaults to `http://localhost:3000`.
 
-UI API location (runtime, no rebuild):
+On Portainer, deploy **`docker-compose.stack.yml`**. Set:
 
-- Leave `API_URL` empty → browser calls `/api` on the same host (nginx proxies to the `api` container)
-- Or set `API_URL` to the API origin the browser should use, e.g. `https://quiz.example.com:3000`
-
-Local Vite: `VITE_API_URL` in `.env`. If the UI origin differs from the API, set `WEB_ORIGIN` on the API (or `*` to allow the request origin).
+- `DOCKER_USERNAME`
+- `OPENROUTER_API_KEY`
+- `API_URL` — public origin of the API, e.g. `http://YOUR_HOST:3000` (must be reachable from the browser, not `http://api:3000`)
 
 ## GitHub Actions
 

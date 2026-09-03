@@ -40,7 +40,7 @@ async function readJson<T>(req: Request): Promise<T> {
 Bun.serve({
   port: PORT,
   hostname: HOST,
-  idleTimeout: 0,
+  idleTimeout: 255,
   async fetch(req) {
     if (req.method === "OPTIONS") return cors(req);
 

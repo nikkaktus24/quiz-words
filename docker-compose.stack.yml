@@ -21,6 +21,8 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-*}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       LIBSQL_URL: http://libsql:8080
+    ports:
+      - "3000:3000"
     depends_on:
       - libsql
     networks:
@@ -36,7 +38,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 8
-      start_period: 10s
+      start_period: 20s
     restart: unless-stopped
 
   web:
@@ -44,11 +46,7 @@ services:
     ports:
       - "8080:80"
     environment:
-      API_URL: ${API_URL:-}
-    depends_on:
-      - api
-    networks:
-      - quiz
+      API_URL: ${API_URL}
     restart: unless-stopped
 
 networks:

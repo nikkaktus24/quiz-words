@@ -20,8 +20,8 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-*}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       LIBSQL_URL: http://libsql:8080
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     depends_on:
       - libsql
     healthcheck:
@@ -45,10 +45,7 @@ services:
     ports:
       - "8080:80"
     environment:
-      API_URL: ${API_URL:-}
-    depends_on:
-      api:
-        condition: service_healthy
+      API_URL: ${API_URL:-http://localhost:3000}
     restart: unless-stopped
 
 volumes:
