@@ -11,12 +11,41 @@ function apiUrl(path: string) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), init);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+  const url = apiUrl(path);
+  const method = init?.method || "GET";
+  const started = performance.now();
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(10 * 60 * 1000),
+    });
+    const text = await res.text();
+    let data: unknown = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text.slice(0, 800) };
+    }
+    if (!res.ok) {
+      console.error("[quiz-words] request failed", {
+        method,
+        url,
+        status: res.status,
+        durationMs: Math.round(performance.now() - started),
+        body: data,
+      });
+      throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+    }
+    return data as T;
+  } catch (err) {
+    console.error("[quiz-words] request error", {
+      method,
+      url,
+      durationMs: Math.round(performance.now() - started),
+      err,
+    });
+    throw err;
   }
-  return data as T;
 }
 
 export const api = {
@@ -43,20 +72,23 @@ export const api = {
   deleteDeck(id: number) {
     return request<{ ok: boolean }>(`/api/decks/${id}`, { method: "DELETE" });
   },
-  extractPhoto(file: File) {
+  extractPhoto(deckId: number, file: File) {
     const form = new FormData();
     form.append("image", file);
-    return request<{ words: string[]; sourceLang: string }>("/api/extract-photo", {
+    return request<{ words: string[]; sourceLang: string }>(`/api/decks/${deckId}/extract-photo`, {
       method: "POST",
       body: form,
     });
   },
   generate(deckId: number, words: string[]) {
-    return request<{ deck: Deck; cards: Card[]; added: number }>(`/api/decks/${deckId}/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ words }),
-    });
+    return request<{ deck: Deck; cards: Card[]; added: number; skipped: number }>(
+      `/api/decks/${deckId}/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ words }),
+      },
+    );
   },
   deleteCard(id: number) {
     return request<{ ok: boolean }>(`/api/cards/${id}`, { method: "DELETE" });

@@ -17,6 +17,8 @@ function apiKey() {
 }
 
 async function chat(content: ChatContent, system: string) {
+  console.log("[quiz-words] OpenRouter request", { model: MODEL });
+  const started = Date.now();
   const res = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -25,6 +27,7 @@ async function chat(content: ChatContent, system: string) {
       "HTTP-Referer": "http://localhost:5173",
       "X-Title": "Quiz Words",
     },
+    signal: AbortSignal.timeout(9 * 60 * 1000),
     body: JSON.stringify({
       model: MODEL,
       temperature: 0.4,
@@ -38,6 +41,11 @@ async function chat(content: ChatContent, system: string) {
 
   if (!res.ok) {
     const errText = await res.text();
+    console.error("[quiz-words] OpenRouter error", {
+      status: res.status,
+      durationMs: Date.now() - started,
+      body: errText.slice(0, 2000),
+    });
     throw new Error(`OpenRouter error ${res.status}: ${errText.slice(0, 500)}`);
   }
 
@@ -45,6 +53,7 @@ async function chat(content: ChatContent, system: string) {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = data.choices?.[0]?.message?.content ?? "";
+  console.log("[quiz-words] OpenRouter ok", { durationMs: Date.now() - started, chars: raw.length });
   return parseJson(raw);
 }
 
@@ -70,19 +79,34 @@ export type GeneratedCard = {
   notes: string;
 };
 
-export async function extractWordsFromImage(dataUrl: string) {
+export async function extractWordsFromImage(
+  dataUrl: string,
+  opts: { sourceLang: string; targetLang: string },
+) {
+  const source =
+    opts.sourceLang === "auto"
+      ? "the language being learned (not the target language below)"
+      : `ISO 639-1 code ${opts.sourceLang}`;
+  const target = opts.targetLang || "en";
+
   const system = `You extract vocabulary from photos of notes, textbooks, lists, or screenshots.
-Return JSON only: {"words":["word or short phrase",...],"sourceLang":"ISO 639-1 code like en, es, fr, de, uk, ru, ja, zh"}.
+Return JSON only: {"words":["word or short phrase",...],"sourceLang":"ISO 639-1 code"}.
+This deck is ${opts.sourceLang} → ${target}.
 Rules:
-- Keep original spelling of each word/phrase.
-- Skip numbers, UI chrome, and full paragraphs unless they are clearly vocab items.
+- Extract ONLY vocabulary written in ${source}.
+- Ignore text in ${target} and in every other language (captions, UI, translations, English chrome, mixed headings).
+- Keep original spelling of each kept word/phrase.
+- Skip numbers and full paragraphs unless they are clearly vocab items in the source language.
 - Deduplicate case-insensitively.
 - Prefer single words or short phrases (max ~5 words).
-- If nothing useful is found, return {"words":[],"sourceLang":"und"}.`;
+- If nothing in the source language is found, return {"words":[],"sourceLang":"${opts.sourceLang === "auto" ? "und" : opts.sourceLang}"}.`;
 
   const json = await chat(
     [
-      { type: "text", text: "Extract vocabulary items from this image." },
+      {
+        type: "text",
+        text: `Extract only ${opts.sourceLang === "auto" ? "source-language" : opts.sourceLang} vocabulary. Ignore ${target} and other languages.`,
+      },
       { type: "image_url", image_url: { url: dataUrl } },
     ],
     system,
@@ -91,7 +115,7 @@ Rules:
   const words = Array.isArray(json.words)
     ? json.words.map((w: unknown) => String(w).trim()).filter(Boolean)
     : [];
-  const sourceLang = String(json.sourceLang || "und");
+  const sourceLang = String(json.sourceLang || opts.sourceLang || "und");
   return { words: uniqueWords(words), sourceLang };
 }
 

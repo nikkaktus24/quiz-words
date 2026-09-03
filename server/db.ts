@@ -61,6 +61,13 @@ await client.execute("PRAGMA foreign_keys = ON");
 for (const statement of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) {
   await client.execute(statement);
 }
+try {
+  await client.execute(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_deck_word ON cards (deck_id, word COLLATE NOCASE)",
+  );
+} catch {
+  // Existing duplicate rows would block the index; generate still skips them.
+}
 
 function mapRow<T>(rs: ResultSet, row: Row): T {
   const obj: Record<string, unknown> = {};

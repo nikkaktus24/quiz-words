@@ -15,6 +15,8 @@ export function DeckPage() {
   const [raw, setRaw] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [info, setInfo] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -28,7 +30,10 @@ export function DeckPage() {
         setDeck(data.deck);
         setCards(data.cards);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        console.error("[quiz-words] load deck failed", err);
+        setError(err.message);
+      });
   }, [deckId, nav, user?.id]);
 
   async function generate(e: FormEvent) {
@@ -40,12 +45,19 @@ export function DeckPage() {
     if (words.length === 0) return;
     setBusy("Writing translations and sentences…");
     setError("");
+    setInfo("");
     try {
       const data = await api.generate(deckId, words);
       setCards(data.cards);
       setDeck(data.deck);
       setRaw("");
+      if (data.added === 0 && data.skipped > 0) {
+        setInfo(`All ${data.skipped} already exist in this deck.`);
+      } else if (data.skipped > 0) {
+        setInfo(`Added ${data.added}. Skipped ${data.skipped} already in this deck.`);
+      }
     } catch (err) {
+      console.error("[quiz-words] generate failed", err);
       setError(err instanceof Error ? err.message : "Generate failed");
     } finally {
       setBusy("");
@@ -54,17 +66,24 @@ export function DeckPage() {
 
   async function onPhoto(file: File) {
     setPreview(URL.createObjectURL(file));
-    setBusy("Reading words from the photo…");
+    setPhotoBusy(true);
+    setBusy("");
     setError("");
+    setInfo("");
     try {
-      const data = await api.extractPhoto(file);
+      const data = await api.extractPhoto(deckId, file);
       setRaw(data.words.join("\n"));
       setTab("words");
-      if (data.words.length === 0) setError("No words found in that photo. Try a clearer shot.");
+      if (data.words.length === 0) {
+        setError(
+          `No ${langLabel(deck?.source_lang || "auto")} words found. Other languages in the photo are ignored.`,
+        );
+      }
     } catch (err) {
+      console.error("[quiz-words] photo extract failed", err);
       setError(err instanceof Error ? err.message : "Photo extract failed");
     } finally {
-      setBusy("");
+      setPhotoBusy(false);
     }
   }
 
@@ -112,7 +131,7 @@ export function DeckPage() {
           <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
             Words
           </button>
-          <button className={`tab ${tab === "photo" ? "on" : ""}`} onClick={() => setTab("photo")}>
+          <button className={`tab ${tab === "photo" ? "on" : ""}`} disabled={photoBusy} onClick={() => setTab("photo")}>
             Photo
           </button>
         </div>
@@ -128,25 +147,37 @@ export function DeckPage() {
               placeholder={"bonjour\nmerci\nà bientôt"}
             />
             <div style={{ marginTop: 12 }}>
-              <button className="primary" disabled={!!busy || !raw.trim()}>
+              <button className="primary" disabled={!!busy || photoBusy || !raw.trim()}>
                 {busy || "Make cards"}
               </button>
             </div>
           </form>
         ) : (
-          <label className="drop">
+          <label className={`drop ${photoBusy ? "loading" : ""}`}>
             <input
               type="file"
               accept="image/*"
+              disabled={photoBusy}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void onPhoto(file);
               }}
             />
-            Drop a photo of notes, a textbook list, or a screenshot — or click to choose one.
-            {preview && <img className="preview" src={preview} alt="Upload preview" />}
+            {photoBusy ? (
+              <div className="photo-loader">
+                <span className="spinner" aria-hidden />
+                <p>Reading {langLabel(deck.source_lang)} words from the photo…</p>
+                <p className="meta">Other languages are ignored.</p>
+              </div>
+            ) : (
+              <>
+                Drop a photo of notes, a textbook list, or a screenshot — or click to choose one.
+                {preview && <img className="preview" src={preview} alt="Upload preview" />}
+              </>
+            )}
           </label>
         )}
+        {info && <p className="ok">{info}</p>}
         {error && <p className="error">{error}</p>}
       </section>
 

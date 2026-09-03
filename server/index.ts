@@ -40,6 +40,7 @@ async function readJson<T>(req: Request): Promise<T> {
 Bun.serve({
   port: PORT,
   hostname: HOST,
+  idleTimeout: 0,
   async fetch(req) {
     if (req.method === "OPTIONS") return cors(req);
 
@@ -50,6 +51,10 @@ Bun.serve({
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
+    const started = Date.now();
+    if (path.includes("generate") || path.includes("extract-photo")) {
+      console.log("[quiz-words] start", method, path);
+    }
 
     if (method === "GET" && path === "/api/health") {
       return json({ ok: true });
@@ -130,8 +135,10 @@ Bun.serve({
         return json(updated);
       }
 
-      const extractMatch = path === "/api/extract-photo";
+      const extractMatch = path.match(/^\/api\/decks\/(\d+)\/extract-photo$/);
       if (method === "POST" && extractMatch) {
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(extractMatch[1])]);
+        if (!deck) return notFound();
         const form = await req.formData();
         const file = form.get("image");
         if (!(file instanceof File)) return bad("image file required");
@@ -139,7 +146,10 @@ Bun.serve({
         const bytes = Buffer.from(await file.arrayBuffer());
         const mime = file.type || "image/jpeg";
         const dataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
-        const result = await extractWordsFromImage(dataUrl);
+        const result = await extractWordsFromImage(dataUrl, {
+          sourceLang: deck.source_lang,
+          targetLang: deck.target_lang,
+        });
         return json(result);
       }
 
@@ -148,26 +158,42 @@ Bun.serve({
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(generateMatch[1])]);
         if (!deck) return notFound();
         const body = await readJson<{ words?: string[] }>(req);
-        const words = (body.words || []).map((w) => w.trim()).filter(Boolean);
+        const words = uniqueIncoming(body.words || []);
         if (words.length === 0) return bad("Add at least one word");
+        const existing = await all<{ word: string }>("SELECT word FROM cards WHERE deck_id = ?", [deck.id]);
+        const taken = new Set(existing.map((row) => row.word.trim().toLowerCase()));
+        const novel = words.filter((w) => !taken.has(w.toLowerCase()));
+        let skipped = words.length - novel.length;
+        if (novel.length === 0) {
+          const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+          return json({ deck, cards, added: 0, skipped });
+        }
         const generated = await generateCards({
-          words,
+          words: novel,
           sourceLang: deck.source_lang,
           targetLang: deck.target_lang,
         });
         if (deck.source_lang === "auto" && generated.sourceLang && generated.sourceLang !== "und") {
           await run("UPDATE decks SET source_lang = ? WHERE id = ?", [generated.sourceLang, deck.id]);
         }
+        let added = 0;
         for (const card of generated.cards) {
-          await run(
-            `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [deck.id, card.word, card.translation, card.sentence, card.sentenceTranslation, card.notes],
-          );
+          if (taken.has(card.word.trim().toLowerCase())) continue;
+          try {
+            await run(
+              `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [deck.id, card.word, card.translation, card.sentence, card.sentenceTranslation, card.notes],
+            );
+            taken.add(card.word.trim().toLowerCase());
+            added += 1;
+          } catch {
+            skipped += 1;
+          }
         }
         const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
         const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
-        return json({ deck: updatedDeck, cards, added: generated.cards.length });
+        return json({ deck: updatedDeck, cards, added, skipped });
       }
 
       const cardMatch = path.match(/^\/api\/cards\/(\d+)$/);
@@ -189,10 +215,28 @@ Bun.serve({
       return notFound();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Server error";
-      console.error(err);
+      console.error("[quiz-words] handler error", {
+        method,
+        path,
+        durationMs: Date.now() - started,
+        err,
+      });
       return json({ error: message }, 500);
     }
   },
 });
 
 console.log(`Quiz Words API on http://${HOST}:${PORT}`);
+
+function uniqueIncoming(words: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of words) {
+    const word = raw.trim();
+    const key = word.toLowerCase();
+    if (!word || seen.has(key)) continue;
+    seen.add(key);
+    out.push(word);
+  }
+  return out;
+}
