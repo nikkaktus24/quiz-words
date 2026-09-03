@@ -37,7 +37,20 @@ SQLite is stored in the `quiz-data` volume.
 
 ## GitHub Actions
 
-`.github/workflows/ci.yml` runs on push and pull request:
+`.github/workflows/ci.yml` runs on push and pull request: typecheck, web build, and Docker images.
 
-- install with Bun, typecheck, and build the web app
-- `docker compose build` for the API and nginx images
+On push to `main`/`master` it also logs in and pushes:
+
+- `{registry}/{username}/quiz-words-api`
+- `{registry}/{username}/quiz-words-web`
+
+Add these in the repo **Settings → Secrets and variables → Actions**:
+
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `USERNAME` | Secret or variable | Registry username |
+| `PASSWORD` | Secret | Registry password or access token |
+| `REGISTRY` | Variable (optional) | Defaults to `docker.io` |
+
+Docker Hub example: `USERNAME` = hub user, `PASSWORD` = [access token](https://hub.docker.com/settings/security).  
+GHCR example: `REGISTRY` = `ghcr.io`, `USERNAME` = GitHub user, `PASSWORD` = PAT with `write:packages`.

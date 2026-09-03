@@ -1,5 +1,6 @@
 services:
   api:
+    image: ${REGISTRY:-docker.io}/${USERNAME:-local}/quiz-words-api:${IMAGE_TAG:-latest}
     build:
       context: ./server
     environment:
@@ -27,6 +28,7 @@ services:
     restart: unless-stopped
 
   web:
+    image: ${REGISTRY:-docker.io}/${USERNAME:-local}/quiz-words-web:${IMAGE_TAG:-latest}
     build:
       context: ./web
     ports:
