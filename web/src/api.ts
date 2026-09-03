@@ -3,11 +3,13 @@ import type { Card, Deck, User } from "./types";
 function apiBase() {
   const runtime = typeof window !== "undefined" ? window.__API_URL__ : "";
   const fromEnv = import.meta.env.VITE_API_URL ?? "";
-  return String(runtime || fromEnv || "").replace(/\/$/, "");
+  return String(runtime || fromEnv || "").trim().replace(/\/$/, "");
 }
 
 function apiUrl(path: string) {
-  return `${apiBase()}${path}`;
+  const base = apiBase();
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${suffix}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
