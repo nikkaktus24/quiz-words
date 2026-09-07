@@ -105,6 +105,7 @@ export function Home() {
             <h3>{d.name}</h3>
             <p className="meta">
               {langLabel(d.source_lang)} → {langLabel(d.target_lang)} · {d.card_count ?? 0} cards
+              {d.shared ? ` · from ${d.owner_username}` : ""}
             </p>
           </Link>
         ))}

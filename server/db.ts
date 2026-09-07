@@ -69,6 +69,17 @@ try {
   // Existing duplicate rows would block the index; generate still skips them.
 }
 
+await client.execute(`
+  CREATE TABLE IF NOT EXISTS deck_shares (
+    deck_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (deck_id, user_id),
+    FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`);
+
 function mapRow<T>(rs: ResultSet, row: Row): T {
   const obj: Record<string, unknown> = {};
   for (const name of rs.columns) {
@@ -107,6 +118,10 @@ export type Deck = {
   target_lang: string;
   created_at: string;
   card_count?: number;
+  owner_username?: string;
+  shared?: boolean;
+  is_owner?: boolean;
+  shared_with?: { id: number; username: string }[];
 };
 export type Card = {
   id: number;

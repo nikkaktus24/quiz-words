@@ -8,6 +8,10 @@ export type Deck = {
   target_lang: string;
   created_at: string;
   card_count?: number;
+  owner_username?: string;
+  shared?: boolean;
+  is_owner?: boolean;
+  shared_with?: { id: number; username: string }[];
 };
 
 export type Card = {

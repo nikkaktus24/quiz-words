@@ -29,7 +29,7 @@ export function StudyPage() {
       nav("/");
       return;
     }
-    api.deck(deckId).then((data) => {
+    api.deck(deckId, user?.id).then((data) => {
       setDeck(data.deck);
       setCards(shuffle(data.cards));
     });

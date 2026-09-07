@@ -19,6 +19,9 @@ export function DeckPage() {
   const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [dedupeBusy, setDedupeBusy] = useState(false);
+  const [shareNames, setShareNames] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [sharedWith, setSharedWith] = useState<{ id: number; username: string }[]>([]);
 
   useEffect(() => {
     if (!user) {
@@ -26,10 +29,11 @@ export function DeckPage() {
       return;
     }
     api
-      .deck(deckId)
+      .deck(deckId, user.id)
       .then((data) => {
         setDeck(data.deck);
         setCards(data.cards);
+        setSharedWith(data.deck.shared_with || []);
       })
       .catch((err) => {
         console.error("[quiz-words] load deck failed", err);
@@ -48,7 +52,7 @@ export function DeckPage() {
     setError("");
     setInfo("");
     try {
-      const data = await api.generate(deckId, words);
+      const data = await api.generate(deckId, words, user?.id);
       setCards(data.cards);
       setDeck(data.deck);
       setRaw("");
@@ -72,7 +76,7 @@ export function DeckPage() {
     setError("");
     setInfo("");
     try {
-      const data = await api.extractPhoto(deckId, file);
+      const data = await api.extractPhoto(deckId, file, user?.id);
       setRaw(data.words.join("\n"));
       setTab("words");
       if (data.words.length === 0) {
@@ -101,7 +105,7 @@ export function DeckPage() {
     setError("");
     setInfo("");
     try {
-      const data = await api.dedupe(deckId);
+      const data = await api.dedupe(deckId, user?.id);
       setCards(data.cards);
       setDeck(data.deck);
       setInfo(
@@ -117,13 +121,55 @@ export function DeckPage() {
     }
   }
 
+  async function onShare(e: FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const names = shareNames
+      .split(/[\n,;]+/)
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (names.length === 0) return;
+    setShareBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const data = await api.share(deckId, user.id, names);
+      setSharedWith(data.shared_with);
+      setShareNames("");
+      const bits: string[] = [];
+      if (data.added.length) bits.push(`Shared with ${data.added.join(", ")}`);
+      if (data.missing.length) bits.push(`Not found: ${data.missing.join(", ")}`);
+      if (data.skipped.length) bits.push(`Already shared: ${data.skipped.join(", ")}`);
+      setInfo(bits.join(". ") || "Updated sharing.");
+    } catch (err) {
+      console.error("[quiz-words] share failed", err);
+      setError(err instanceof Error ? err.message : "Could not share");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function onUnshare(username: string) {
+    if (!user) return;
+    try {
+      const data = await api.unshare(deckId, user.id, username);
+      setSharedWith(data.shared_with);
+      if (deck?.shared && username.toLowerCase() === user.username.toLowerCase()) {
+        nav("/home");
+      }
+    } catch (err) {
+      console.error("[quiz-words] unshare failed", err);
+      setError(err instanceof Error ? err.message : "Could not update sharing");
+    }
+  }
+
   async function removeDeck() {
     if (!confirm("Delete this deck?")) return;
-    await api.deleteDeck(deckId);
+    await api.deleteDeck(deckId, user?.id);
     nav("/home");
   }
 
-  if (!deck) {
+  if (!user || !deck) {
     return (
       <div className="shell">
         <p>{error || "Loading…"}</p>
@@ -141,6 +187,7 @@ export function DeckPage() {
           <h1 style={{ marginTop: 6 }}>{deck.name}</h1>
           <p className="meta">
             {langLabel(deck.source_lang)} → {langLabel(deck.target_lang)}
+            {deck.shared ? ` · shared by ${deck.owner_username}` : ""}
           </p>
         </div>
         <div className="row">
@@ -150,15 +197,58 @@ export function DeckPage() {
           <Link className="pine" to={`/decks/${deck.id}/study?mode=write`}>
             Write
           </Link>
-          <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
-            {dedupeBusy ? "Checking…" : "Remove duplicates"}
-          </button>
-          <button className="danger" onClick={removeDeck}>
-            Delete
-          </button>
+          {deck.is_owner !== false && !deck.shared && (
+            <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
+              {dedupeBusy ? "Checking…" : "Remove duplicates"}
+            </button>
+          )}
+          {deck.shared ? (
+            <button className="danger" onClick={() => void onUnshare(user.username)}>
+              Leave
+            </button>
+          ) : (
+            <button className="danger" onClick={removeDeck}>
+              Delete
+            </button>
+          )}
         </div>
       </header>
 
+      {deck.is_owner !== false && !deck.shared && (
+        <section className="panel" style={{ marginBottom: 16 }}>
+          <h2>Share</h2>
+          <p className="lede">Type usernames to share this deck. They will see it in their library.</p>
+          <form className="row" onSubmit={onShare}>
+            <div className="grow">
+              <label htmlFor="share-names">Usernames</label>
+              <input
+                id="share-names"
+                className="field"
+                value={shareNames}
+                onChange={(e) => setShareNames(e.target.value)}
+                placeholder="alex, maria"
+              />
+            </div>
+            <button className="primary" disabled={shareBusy || !shareNames.trim()}>
+              {shareBusy ? "Sharing…" : "Share"}
+            </button>
+          </form>
+          {sharedWith.length > 0 && (
+            <div className="share-list">
+              {sharedWith.map((person) => (
+                <span className="share-chip" key={person.id}>
+                  {person.username}
+                  <button type="button" onClick={() => void onUnshare(person.username)} aria-label={`Stop sharing with ${person.username}`}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {deck.is_owner !== false && !deck.shared && (
       <section className="panel">
         <div className="tabs">
           <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
@@ -213,6 +303,15 @@ export function DeckPage() {
         {info && <p className="ok">{info}</p>}
         {error && <p className="error">{error}</p>}
       </section>
+      )}
+
+      {(deck.shared || deck.is_owner === false) && (
+        <section className="panel" style={{ marginBottom: 16 }}>
+          {info && <p className="ok">{info}</p>}
+          {error && <p className="error">{error}</p>}
+          <p className="meta">Shared by {deck.owner_username}. You can study this deck.</p>
+        </section>
+      )}
 
       <div className="card-list">
         {cards.map((c) => (
@@ -224,6 +323,7 @@ export function DeckPage() {
               <div className="sentence">{c.sentence_translation}</div>
               {c.notes && <div className="note">{c.notes}</div>}
             </div>
+            {deck.is_owner !== false && !deck.shared && (
             <button
               className="ghost"
               onClick={async () => {
@@ -233,6 +333,7 @@ export function DeckPage() {
             >
               Remove
             </button>
+            )}
           </article>
         ))}
       </div>

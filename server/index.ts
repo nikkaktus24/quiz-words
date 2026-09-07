@@ -80,11 +80,21 @@ Bun.serve({
         const user = await get<User>("SELECT * FROM users WHERE id = ?", [userId]);
         if (!user) return json({ error: "User not found" }, 404);
         const decks = await all<Deck>(
-          `SELECT d.*, (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count
-           FROM decks d WHERE d.user_id = ? ORDER BY d.created_at DESC`,
-          [userId],
+          `SELECT d.*,
+                  u.username AS owner_username,
+                  CASE WHEN d.user_id = ? THEN 0 ELSE 1 END AS shared,
+                  (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count
+           FROM decks d
+           JOIN users u ON u.id = d.user_id
+           WHERE d.user_id = ?
+              OR d.id IN (SELECT deck_id FROM deck_shares WHERE user_id = ?)
+           ORDER BY d.created_at DESC`,
+          [userId, userId, userId],
         );
-        return json({ user, decks });
+        return json({
+          user,
+          decks: decks.map((d) => ({ ...d, shared: Boolean(d.shared), is_owner: !d.shared })),
+        });
       }
 
       if (method === "POST" && path === "/api/decks") {
@@ -111,13 +121,33 @@ Bun.serve({
       if (deckMatch && method === "GET") {
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
         if (!deck) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && !(await canAccessDeck(deck, actorId))) {
+          return json({ error: "You do not have access to this deck" }, 403);
+        }
+        const owner = await get<User>("SELECT * FROM users WHERE id = ?", [deck.user_id]);
+        const sharedWith = await listShares(deck.id);
         const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
-        return json({ deck, cards });
+        return json({
+          deck: {
+            ...deck,
+            owner_username: owner?.username,
+            shared_with: sharedWith,
+            is_owner: actorId ? deck.user_id === actorId : true,
+            shared: actorId ? deck.user_id !== actorId : false,
+          },
+          cards,
+        });
       }
 
       if (deckMatch && method === "DELETE") {
-        await run("DELETE FROM cards WHERE deck_id = ?", [Number(deckMatch[1])]);
-        await run("DELETE FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        if (!deck) return notFound();
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can delete this deck" }, 403);
+        await run("DELETE FROM cards WHERE deck_id = ?", [deck.id]);
+        await run("DELETE FROM deck_shares WHERE deck_id = ?", [deck.id]);
+        await run("DELETE FROM decks WHERE id = ?", [deck.id]);
         return json({ ok: true });
       }
 
@@ -135,10 +165,68 @@ Bun.serve({
         return json(updated);
       }
 
+      const shareMatch = path.match(/^\/api\/decks\/(\d+)\/share$/);
+      if (shareMatch && method === "POST") {
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(shareMatch[1])]);
+        if (!deck) return notFound();
+        const body = await readJson<{ userId?: number; usernames?: string[]; username?: string }>(req);
+        if (!body.userId || deck.user_id !== body.userId) {
+          return json({ error: "Only the owner can share this deck" }, 403);
+        }
+        const names = parseUsernames(body.usernames?.length ? body.usernames : [body.username || ""]);
+        if (names.length === 0) return bad("Write at least one username");
+        const missing: string[] = [];
+        const added: string[] = [];
+        const skipped: string[] = [];
+        for (const name of names) {
+          const target = await get<User>("SELECT * FROM users WHERE username = ?", [name]);
+          if (!target) {
+            missing.push(name);
+            continue;
+          }
+          if (target.id === deck.user_id) {
+            skipped.push(name);
+            continue;
+          }
+          try {
+            await run("INSERT INTO deck_shares (deck_id, user_id) VALUES (?, ?)", [deck.id, target.id]);
+            added.push(target.username);
+          } catch {
+            skipped.push(target.username);
+          }
+        }
+        const sharedWith = await listShares(deck.id);
+        if (missing.length && added.length === 0) {
+          return json({ error: `No such user: ${missing.join(", ")}`, shared_with: sharedWith }, 400);
+        }
+        return json({
+          shared_with: sharedWith,
+          added,
+          skipped,
+          missing,
+        });
+      }
+
+      if (shareMatch && method === "DELETE") {
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(shareMatch[1])]);
+        if (!deck) return notFound();
+        const body = await readJson<{ userId?: number; username?: string }>(req);
+        if (!body.userId || !body.username?.trim()) return bad("userId and username required");
+        const target = await get<User>("SELECT * FROM users WHERE username = ?", [body.username.trim()]);
+        if (!target) return json({ error: "User not found" }, 404);
+        const isOwner = deck.user_id === body.userId;
+        const isSelf = target.id === body.userId;
+        if (!isOwner && !isSelf) return json({ error: "Not allowed" }, 403);
+        await run("DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?", [deck.id, target.id]);
+        return json({ shared_with: await listShares(deck.id) });
+      }
+
       const dedupeMatch = path.match(/^\/api\/decks\/(\d+)\/dedupe$/);
       if (dedupeMatch && method === "POST") {
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(dedupeMatch[1])]);
         if (!deck) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
         const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id ASC", [deck.id]);
         const keep = new Map<string, Card>();
         const removeIds: number[] = [];
@@ -170,6 +258,8 @@ Bun.serve({
       if (method === "POST" && extractMatch) {
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(extractMatch[1])]);
         if (!deck) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
         const form = await req.formData();
         const file = form.get("image");
         if (!(file instanceof File)) return bad("image file required");
@@ -188,6 +278,8 @@ Bun.serve({
       if (generateMatch && method === "POST") {
         const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(generateMatch[1])]);
         if (!deck) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
         const body = await readJson<{ words?: string[] }>(req);
         const words = uniqueIncoming(body.words || []);
         if (words.length === 0) return bad("Add at least one word");
@@ -270,4 +362,37 @@ function uniqueIncoming(words: string[]) {
     out.push(word);
   }
   return out;
+}
+
+function parseUsernames(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    for (const part of value.split(/[\n,;]+/)) {
+      const name = part.trim();
+      const key = name.toLowerCase();
+      if (name.length < 2 || seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+async function listShares(deckId: number) {
+  return all<{ id: number; username: string }>(
+    `SELECT u.id, u.username FROM deck_shares s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.deck_id = ? ORDER BY u.username COLLATE NOCASE`,
+    [deckId],
+  );
+}
+
+async function canAccessDeck(deck: Deck, userId: number) {
+  if (deck.user_id === userId) return true;
+  const row = await get<{ deck_id: number }>(
+    "SELECT deck_id FROM deck_shares WHERE deck_id = ? AND user_id = ?",
+    [deck.id, userId],
+  );
+  return Boolean(row);
 }

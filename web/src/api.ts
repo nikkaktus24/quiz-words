@@ -68,28 +68,52 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  deck(id: number) {
-    return request<{ deck: Deck; cards: Card[] }>(`/api/decks/${id}`);
+  deck(id: number, userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ deck: Deck; cards: Card[] }>(`/api/decks/${id}${q}`);
   },
-  deleteDeck(id: number) {
-    return request<{ ok: boolean }>(`/api/decks/${id}`, { method: "DELETE" });
+  deleteDeck(id: number, userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ ok: boolean }>(`/api/decks/${id}${q}`, { method: "DELETE" });
   },
-  dedupe(deckId: number) {
-    return request<{ deck: Deck; cards: Card[]; removed: number }>(`/api/decks/${deckId}/dedupe`, {
+  share(deckId: number, userId: number, usernames: string[]) {
+    return request<{
+      shared_with: { id: number; username: string }[];
+      added: string[];
+      skipped: string[];
+      missing: string[];
+    }>(`/api/decks/${deckId}/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, usernames }),
+    });
+  },
+  unshare(deckId: number, userId: number, username: string) {
+    return request<{ shared_with: { id: number; username: string }[] }>(`/api/decks/${deckId}/share`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, username }),
+    });
+  },
+  dedupe(deckId: number, userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ deck: Deck; cards: Card[]; removed: number }>(`/api/decks/${deckId}/dedupe${q}`, {
       method: "POST",
     });
   },
-  extractPhoto(deckId: number, file: File) {
+  extractPhoto(deckId: number, file: File, userId?: number) {
     const form = new FormData();
     form.append("image", file);
-    return request<{ words: string[]; sourceLang: string }>(`/api/decks/${deckId}/extract-photo`, {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ words: string[]; sourceLang: string }>(`/api/decks/${deckId}/extract-photo${q}`, {
       method: "POST",
       body: form,
     });
   },
-  generate(deckId: number, words: string[]) {
+  generate(deckId: number, words: string[], userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
     return request<{ deck: Deck; cards: Card[]; added: number; skipped: number }>(
-      `/api/decks/${deckId}/generate`,
+      `/api/decks/${deckId}/generate${q}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
