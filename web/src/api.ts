@@ -131,4 +131,37 @@ export const api = {
       body: JSON.stringify({ known }),
     });
   },
+  importSet(body: ImportBody) {
+    return request<ImportResult>("/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  importIntoDeck(deckId: number, body: ImportBody) {
+    const q = body.userId ? `?userId=${body.userId}` : "";
+    return request<ImportResult>(`/api/decks/${deckId}/import${q}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+};
+
+export type ImportBody = {
+  userId: number;
+  url?: string;
+  json?: unknown;
+  text?: string;
+  name?: string;
+  sourceLang?: string;
+  targetLang?: string;
+};
+
+export type ImportResult = {
+  deck: Deck;
+  cards: Card[];
+  added: number;
+  skipped: number;
+  title: string;
 };

@@ -1,6 +1,6 @@
 # quiz-words
 
-A small Quizlet-style studio: type words (or photograph a list), get translations and memory sentences, then flip or write the matching word.
+A Quizlet-style studio: create or import a set, then study with Flashcards, Learn, and Test. Type words, photograph a list, or paste a Quizlet link / JSON export. Share sets by username.
 
 **Stack:** React UI · Bun API · libSQL · OpenRouter (`openai/gpt-5-nano`)
 

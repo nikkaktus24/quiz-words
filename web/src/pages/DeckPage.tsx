@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
+import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
+import { ModeTiles } from "../components/ModeNav";
 import { getSavedUser } from "../session";
 import { langLabel, type Card, type Deck } from "../types";
 
@@ -11,11 +13,12 @@ export function DeckPage() {
   const deckId = Number(id);
   const [deck, setDeck] = useState<Deck | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
-  const [tab, setTab] = useState<"words" | "photo">("words");
+  const [tab, setTab] = useState<"words" | "photo" | "import">("words");
   const [raw, setRaw] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [dedupeBusy, setDedupeBusy] = useState(false);
@@ -57,9 +60,9 @@ export function DeckPage() {
       setDeck(data.deck);
       setRaw("");
       if (data.added === 0 && data.skipped > 0) {
-        setInfo(`All ${data.skipped} already exist in this deck.`);
+        setInfo(`All ${data.skipped} already exist in this set.`);
       } else if (data.skipped > 0) {
-        setInfo(`Added ${data.added}. Skipped ${data.skipped} already in this deck.`);
+        setInfo(`Added ${data.added}. Skipped ${data.skipped} already in this set.`);
       }
     } catch (err) {
       console.error("[quiz-words] generate failed", err);
@@ -92,10 +95,30 @@ export function DeckPage() {
     }
   }
 
+  async function onImport(payload: ImportSubmit) {
+    if (!user) return;
+    setImportBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const data = await api.importIntoDeck(deckId, { userId: user.id, ...payload });
+      setCards(data.cards);
+      setDeck(data.deck);
+      const bits = [`Imported ${data.added} card${data.added === 1 ? "" : "s"}`];
+      if (data.skipped) bits.push(`skipped ${data.skipped} already in this set`);
+      setInfo(`${bits.join(". ")}. Share it with usernames below.`);
+    } catch (err) {
+      console.error("[quiz-words] import failed", err);
+      setError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function removeDuplicates() {
     const extra = duplicateCount(cards);
     if (extra === 0) {
-      setInfo("No duplicate words in this deck.");
+      setInfo("No duplicate words in this set.");
       return;
     }
     if (!confirm(`Remove ${extra} duplicate card${extra === 1 ? "" : "s"}? The first copy of each word is kept.`)) {
@@ -110,7 +133,7 @@ export function DeckPage() {
       setDeck(data.deck);
       setInfo(
         data.removed === 0
-          ? "No duplicate words in this deck."
+          ? "No duplicate words in this set."
           : `Removed ${data.removed} duplicate card${data.removed === 1 ? "" : "s"}.`,
       );
     } catch (err) {
@@ -164,7 +187,7 @@ export function DeckPage() {
   }
 
   async function removeDeck() {
-    if (!confirm("Delete this deck?")) return;
+    if (!confirm("Delete this set?")) return;
     await api.deleteDeck(deckId, user?.id);
     nav("/home");
   }
@@ -177,27 +200,24 @@ export function DeckPage() {
     );
   }
 
+  const owner = deck.is_owner !== false && !deck.shared;
+
   return (
     <div className="shell">
       <header className="topbar">
         <div>
           <Link className="meta" to="/home">
-            ← Decks
+            ← Your sets
           </Link>
           <h1 style={{ marginTop: 6 }}>{deck.name}</h1>
           <p className="meta">
-            {langLabel(deck.source_lang)} → {langLabel(deck.target_lang)}
-            {deck.shared ? ` · shared by ${deck.owner_username}` : ""}
+            {langLabel(deck.source_lang)} → {langLabel(deck.target_lang)} · {cards.length} term
+            {cards.length === 1 ? "" : "s"}
+            {deck.shared ? ` · from ${deck.owner_username}` : ""}
           </p>
         </div>
         <div className="row">
-          <Link className="ghost" to={`/decks/${deck.id}/study`}>
-            Flip
-          </Link>
-          <Link className="pine" to={`/decks/${deck.id}/study?mode=write`}>
-            Write
-          </Link>
-          {deck.is_owner !== false && !deck.shared && (
+          {owner && (
             <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
               {dedupeBusy ? "Checking…" : "Remove duplicates"}
             </button>
@@ -214,10 +234,12 @@ export function DeckPage() {
         </div>
       </header>
 
-      {deck.is_owner !== false && !deck.shared && (
+      <ModeTiles deckId={deck.id} count={cards.length} />
+
+      {owner && (
         <section className="panel" style={{ marginBottom: 16 }}>
           <h2>Share</h2>
-          <p className="lede">Type usernames to share this deck. They will see it in their library.</p>
+          <p className="lede">Type usernames to share this set. They get Flashcards, Learn, and Test in their library.</p>
           <form className="row" onSubmit={onShare}>
             <div className="grow">
               <label htmlFor="share-names">Usernames</label>
@@ -248,91 +270,100 @@ export function DeckPage() {
         </section>
       )}
 
-      {deck.is_owner !== false && !deck.shared && (
-      <section className="panel">
-        <div className="tabs">
-          <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
-            Words
-          </button>
-          <button className={`tab ${tab === "photo" ? "on" : ""}`} disabled={photoBusy} onClick={() => setTab("photo")}>
-            Photo
-          </button>
-        </div>
+      {owner && (
+        <section className="panel">
+          <div className="tabs">
+            <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
+              Words
+            </button>
+            <button className={`tab ${tab === "photo" ? "on" : ""}`} disabled={photoBusy} onClick={() => setTab("photo")}>
+              Photo
+            </button>
+            <button className={`tab ${tab === "import" ? "on" : ""}`} disabled={importBusy} onClick={() => setTab("import")}>
+              Import
+            </button>
+          </div>
 
-        {tab === "words" ? (
-          <form onSubmit={generate}>
-            <label>One word or phrase per line (commas work too)</label>
-            <textarea
-              className="field"
-              rows={7}
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              placeholder={"bonjour\nmerci\nà bientôt"}
-            />
-            <div style={{ marginTop: 12 }}>
-              <button className="primary" disabled={!!busy || photoBusy || !raw.trim()}>
-                {busy || "Make cards"}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <label className={`drop ${photoBusy ? "loading" : ""}`}>
-            <input
-              type="file"
-              accept="image/*"
-              disabled={photoBusy}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void onPhoto(file);
-              }}
-            />
-            {photoBusy ? (
-              <div className="photo-loader">
-                <span className="spinner" aria-hidden />
-                <p>Reading {langLabel(deck.source_lang)} words from the photo…</p>
-                <p className="meta">Other languages are ignored.</p>
+          {tab === "words" && (
+            <form onSubmit={generate}>
+              <label>One word or phrase per line (commas work too)</label>
+              <textarea
+                className="field"
+                rows={7}
+                value={raw}
+                onChange={(e) => setRaw(e.target.value)}
+                placeholder={"bonjour\nmerci\nà bientôt"}
+              />
+              <div style={{ marginTop: 12 }}>
+                <button className="primary" disabled={!!busy || photoBusy || !raw.trim()}>
+                  {busy || "Make cards"}
+                </button>
               </div>
-            ) : (
-              <>
-                Drop a photo of notes, a textbook list, or a screenshot — or click to choose one.
-                {preview && <img className="preview" src={preview} alt="Upload preview" />}
-              </>
-            )}
-          </label>
-        )}
-        {info && <p className="ok">{info}</p>}
-        {error && <p className="error">{error}</p>}
-      </section>
-      )}
+            </form>
+          )}
 
-      {(deck.shared || deck.is_owner === false) && (
-        <section className="panel" style={{ marginBottom: 16 }}>
+          {tab === "photo" && (
+            <label className={`drop ${photoBusy ? "loading" : ""}`}>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={photoBusy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void onPhoto(file);
+                }}
+              />
+              {photoBusy ? (
+                <div className="photo-loader">
+                  <span className="spinner" aria-hidden />
+                  <p>Reading {langLabel(deck.source_lang)} words from the photo…</p>
+                  <p className="meta">Other languages are ignored.</p>
+                </div>
+              ) : (
+                <>
+                  Drop a photo of notes, a textbook list, or a screenshot — or click to choose one.
+                  {preview && <img className="preview" src={preview} alt="Upload preview" />}
+                </>
+              )}
+            </label>
+          )}
+
+          {tab === "import" && <ImportPanel busy={importBusy} onSubmit={onImport} />}
+
           {info && <p className="ok">{info}</p>}
           {error && <p className="error">{error}</p>}
-          <p className="meta">Shared by {deck.owner_username}. You can study this deck.</p>
         </section>
       )}
 
+      {!owner && (
+        <section className="panel" style={{ marginBottom: 16 }}>
+          {info && <p className="ok">{info}</p>}
+          {error && <p className="error">{error}</p>}
+          <p className="meta">Shared by {deck.owner_username}. You can study this set.</p>
+        </section>
+      )}
+
+      <h2 className="terms-heading">Terms ({cards.length})</h2>
       <div className="card-list">
         {cards.map((c) => (
           <article className="panel study-card" key={c.id}>
             <div>
               <div className="word">{c.word}</div>
               <div className="translation">{c.translation}</div>
-              <div className="sentence">{c.sentence}</div>
-              <div className="sentence">{c.sentence_translation}</div>
+              {c.sentence ? <div className="sentence">{c.sentence}</div> : null}
+              {c.sentence_translation ? <div className="sentence">{c.sentence_translation}</div> : null}
               {c.notes && <div className="note">{c.notes}</div>}
             </div>
-            {deck.is_owner !== false && !deck.shared && (
-            <button
-              className="ghost"
-              onClick={async () => {
-                await api.deleteCard(c.id);
-                setCards((list) => list.filter((x) => x.id !== c.id));
-              }}
-            >
-              Remove
-            </button>
+            {owner && (
+              <button
+                className="ghost"
+                onClick={async () => {
+                  await api.deleteCard(c.id);
+                  setCards((list) => list.filter((x) => x.id !== c.id));
+                }}
+              >
+                Remove
+              </button>
             )}
           </article>
         ))}

@@ -1,5 +1,6 @@
 import { all, get, insertId, run, type Card, type Deck, type User } from "./db";
 import { extractWordsFromImage, generateCards } from "./ai";
+import { importFromQuizletUrl, parseImportPayload, type ImportedCard } from "./import";
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -52,7 +53,7 @@ Bun.serve({
     const path = url.pathname;
     const method = req.method;
     const started = Date.now();
-    if (path.includes("generate") || path.includes("extract-photo")) {
+    if (path.includes("generate") || path.includes("extract-photo") || path.includes("import")) {
       console.log("[quiz-words] start", method, path);
     }
 
@@ -95,6 +96,23 @@ Bun.serve({
           user,
           decks: decks.map((d) => ({ ...d, shared: Boolean(d.shared), is_owner: !d.shared })),
         });
+      }
+
+      if (method === "POST" && path === "/api/import") {
+        const parsed = await readImportRequest(req);
+        if (!parsed.userId) return bad("userId required");
+        const user = await get<User>("SELECT * FROM users WHERE id = ?", [parsed.userId]);
+        if (!user) return json({ error: "User not found" }, 404);
+        if (parsed.cards.length === 0) return bad("No cards found in that file or Quizlet link.");
+        const name = parsed.title || parsed.name || "Imported set";
+        const id = await insertId(
+          "INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)",
+          [parsed.userId, name, parsed.sourceLang, parsed.targetLang],
+        );
+        const result = await insertImported(id, parsed.cards, parsed.title);
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [id]);
+        console.log("[quiz-words] import new", { deckId: id, added: result.added, skipped: result.skipped, title: parsed.title });
+        return json({ deck, cards: result.cards, added: result.added, skipped: result.skipped, title: parsed.title }, 201);
       }
 
       if (method === "POST" && path === "/api/decks") {
@@ -319,6 +337,23 @@ Bun.serve({
         return json({ deck: updatedDeck, cards, added, skipped });
       }
 
+      const importMatch = path.match(/^\/api\/decks\/(\d+)\/import$/);
+      if (importMatch && method === "POST") {
+        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(importMatch[1])]);
+        if (!deck) return notFound();
+        const parsed = await readImportRequest(req);
+        const actorId = parsed.userId || Number(url.searchParams.get("userId") || 0);
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can import cards" }, 403);
+        if (parsed.cards.length === 0) return bad("No cards found in that file or Quizlet link.");
+        const result = await insertImported(deck.id, parsed.cards, parsed.title);
+        if (parsed.title && (deck.name === "Untitled" || deck.name.toLowerCase() === "quizlet")) {
+          await run("UPDATE decks SET name = ? WHERE id = ?", [parsed.title, deck.id]);
+        }
+        const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
+        console.log("[quiz-words] import", { deckId: deck.id, added: result.added, skipped: result.skipped, title: parsed.title });
+        return json({ deck: updatedDeck, cards: result.cards, added: result.added, skipped: result.skipped, title: parsed.title });
+      }
+
       const cardMatch = path.match(/^\/api\/cards\/(\d+)$/);
       if (cardMatch && method === "DELETE") {
         await run("DELETE FROM cards WHERE id = ?", [Number(cardMatch[1])]);
@@ -386,6 +421,95 @@ async function listShares(deckId: number) {
      WHERE s.deck_id = ? ORDER BY u.username COLLATE NOCASE`,
     [deckId],
   );
+}
+
+async function insertImported(deckId: number, incoming: ImportedCard[], title = "") {
+  const existing = await all<{ word: string }>("SELECT word FROM cards WHERE deck_id = ?", [deckId]);
+  const taken = new Set(existing.map((row) => row.word.trim().toLowerCase()));
+  let added = 0;
+  let skipped = 0;
+  const note = title ? `Quizlet: ${title}` : "";
+  for (const card of incoming) {
+    const key = card.word.trim().toLowerCase();
+    if (taken.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      await run(
+        `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          deckId,
+          card.word,
+          card.translation,
+          card.sentence || "",
+          card.sentenceTranslation || "",
+          card.notes || note,
+        ],
+      );
+      taken.add(key);
+      added += 1;
+    } catch {
+      skipped += 1;
+    }
+  }
+  const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deckId]);
+  return { cards, added, skipped };
+}
+
+async function readImportRequest(req: Request) {
+  const ctype = req.headers.get("content-type") || "";
+  let userId = 0;
+  let name = "";
+  let sourceLang = "auto";
+  let targetLang = "en";
+  let title = "";
+  let cards: ImportedCard[] = [];
+
+  if (ctype.includes("multipart/form-data")) {
+    const form = await req.formData();
+    userId = Number(form.get("userId") || 0);
+    name = String(form.get("name") || "").trim();
+    sourceLang = String(form.get("sourceLang") || "auto").trim() || "auto";
+    targetLang = String(form.get("targetLang") || "en").trim() || "en";
+    const file = form.get("file");
+    const link = String(form.get("url") || "").trim();
+    const raw = String(form.get("json") || "").trim();
+    if (file instanceof File && file.size > 0) {
+      cards = parseImportPayload(await file.text());
+    } else if (raw) {
+      cards = parseImportPayload(raw);
+    } else if (link) {
+      const fetched = await importFromQuizletUrl(link);
+      cards = fetched.cards;
+      title = fetched.title;
+    }
+  } else {
+    const body = await readJson<{
+      userId?: number;
+      name?: string;
+      sourceLang?: string;
+      targetLang?: string;
+      url?: string;
+      json?: unknown;
+      cards?: unknown;
+      text?: string;
+    }>(req);
+    userId = Number(body.userId || 0);
+    name = body.name?.trim() || "";
+    sourceLang = (body.sourceLang || "auto").trim();
+    targetLang = (body.targetLang || "en").trim();
+    if (body.url?.trim()) {
+      const fetched = await importFromQuizletUrl(body.url.trim());
+      cards = fetched.cards;
+      title = fetched.title;
+    } else {
+      cards = parseImportPayload(body.cards ?? body.json ?? body.text ?? body);
+    }
+  }
+
+  return { userId, name, sourceLang, targetLang, title, cards };
 }
 
 async function canAccessDeck(deck: Deck, userId: number) {

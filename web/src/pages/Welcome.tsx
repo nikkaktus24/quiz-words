@@ -27,11 +27,10 @@ export function Welcome() {
   return (
     <div className="welcome">
       <form className="welcome-card" onSubmit={onSubmit}>
-        <div className="eyebrow">Word studio</div>
-        <h1>Learn words like a set of cards, not a list.</h1>
+        <div className="eyebrow">Study sets</div>
+        <h1>Flashcards, Learn, and Test — like Quizlet, for your words.</h1>
         <p className="lede">
-          Type words or photograph a page. Lumen translates them, writes a memory sentence, and turns
-          them into a study deck.
+          Type words, photograph a list, or import a Quizlet set. Then share it by username.
         </p>
         <label htmlFor="username">Username</label>
         <input
@@ -45,7 +44,7 @@ export function Welcome() {
         {error && <p className="error">{error}</p>}
         <div style={{ marginTop: 18 }}>
           <button className="primary" disabled={busy || username.trim().length < 2}>
-            {busy ? "Opening…" : "Enter studio"}
+            {busy ? "Opening…" : "Get started"}
           </button>
         </div>
       </form>
