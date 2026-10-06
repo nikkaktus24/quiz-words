@@ -11,7 +11,7 @@ RUN bun run build
 
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY cors-preflight.conf /etc/nginx/cors-preflight.conf
+COPY api-proxy.conf /etc/nginx/api-proxy.conf
 COPY docker-entrypoint.d/40-api-url.sh /docker-entrypoint.d/40-api-url.sh
 RUN chmod +x /docker-entrypoint.d/40-api-url.sh
 COPY --from=build /app/dist /usr/share/nginx/html

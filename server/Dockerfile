@@ -6,8 +6,7 @@ RUN bun install --frozen-lockfile
 
 COPY index.ts db.ts ai.ts import.ts tsconfig.json ./
 
-ENV PORT=3000 HOST=0.0.0.0 DATA_DIR=/data
+ENV PORT=3000 HOST=0.0.0.0
 EXPOSE 3000
-VOLUME ["/data"]
 
 CMD ["bun", "index.ts"]

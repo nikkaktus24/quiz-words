@@ -1,14 +1,14 @@
 {
   "name": "quiz-words-api",
-  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
   "scripts": {
     "dev": "bun --watch --env-file=../.env index.ts",
     "start": "bun index.ts"
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
+  "type": "module",
   "dependencies": {
-    "@libsql/client": "^0.18.0"
+    "mongodb": "^6.21.0"
   }
 }

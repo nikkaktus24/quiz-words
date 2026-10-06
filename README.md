@@ -2,7 +2,7 @@
 
 A vocabulary studio: create or import a set, then study with Flashcards, Learn, and Test. Type words, photograph a list, or paste a set link / JSON export. Share sets by username.
 
-**Stack:** React UI · Bun API · libSQL · OpenRouter (`openai/gpt-5-nano`)
+**Stack:** React UI · Bun API · MongoDB · OpenRouter (`openai/gpt-5-nano`)
 
 ## Setup
 
@@ -34,16 +34,15 @@ docker compose up --build
 
 App: http://localhost:8080  
 API: http://localhost:3000  
-libSQL HTTP: http://localhost:8081  
-Data is stored in the `libsql-data` volume.
+Data is stored in MongoDB (`mongo-data` volume). Local `bun run dev` expects MongoDB at `mongodb://127.0.0.1:27017`.
 
-Nginx only serves the UI. The browser calls the API using **`API_URL`** (not an nginx proxy). Local compose defaults to `http://localhost:3000`.
+Nginx serves the UI. Leave **`API_URL` empty** in Docker so the browser uses same-origin `/api`. Local Vite can leave it empty and use the `/api` proxy.
 
 On Portainer, deploy **`docker-compose.stack.yml`**. Set:
 
 - `DOCKER_USERNAME`
 - `OPENROUTER_API_KEY`
-- `API_URL` — public origin of the API, e.g. `http://YOUR_HOST:3000` (must be reachable from the browser, not `http://api:3000`)
+- `API_URL` — leave empty, or set the public app origin if the UI is on a different host
 
 ## GitHub Actions
 

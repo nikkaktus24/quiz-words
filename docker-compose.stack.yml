@@ -1,18 +1,22 @@
 # Portainer / production: pull images only (no build context).
 # Stack env:
 #   DOCKER_USERNAME, OPENROUTER_API_KEY
-#   API_URL — public API origin the browser should call, e.g. http://YOUR_HOST:3000
+#   API_URL — public origin the browser should call, e.g. https://app.example.com
+#   Leave API_URL empty to use same-origin /api on the web host.
 
 services:
-  libsql:
-    image: ghcr.io/tursodatabase/libsql-server:latest
-    environment:
-      SQLD_NODE: primary
-      SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+  mongo:
+    image: mongo:7
     volumes:
-      - libsql-data:/var/lib/sqld
+      - mongo-data:/data/db
     networks:
       - quiz
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
     restart: unless-stopped
 
   api:
@@ -22,11 +26,12 @@ services:
       HOST: "0.0.0.0"
       WEB_ORIGIN: ${WEB_ORIGIN:-*}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      LIBSQL_URL: http://libsql:8080
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: quiz
     ports:
       - "3000:3000"
     depends_on:
-      - libsql
+      - mongo
     networks:
       - quiz
     healthcheck:
@@ -48,12 +53,15 @@ services:
     ports:
       - "8080:80"
     environment:
-      # Browser-facing API origin (not http://api:3000). Example: http://192.168.1.10:3000
       API_URL: ${API_URL:-}
+    depends_on:
+      - api
+    networks:
+      - quiz
     restart: unless-stopped
 
 networks:
   quiz:
 
 volumes:
-  libsql-data:
+  mongo-data:

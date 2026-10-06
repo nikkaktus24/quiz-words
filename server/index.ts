@@ -1,4 +1,24 @@
-import { all, get, insertId, run, type Card, type Deck, type User } from "./db";
+import {
+  addShare,
+  canAccessDeck,
+  createDeck,
+  createUser,
+  deleteCardById,
+  deleteCardsByIds,
+  deleteDeck,
+  findDeckById,
+  findUserById,
+  findUserByUsername,
+  incrementReview,
+  insertCard,
+  listCardWords,
+  listCards,
+  listShares,
+  listUserDecks,
+  removeShare,
+  updateDeck,
+  type Card,
+} from "./db";
 import { extractWordsFromImage, generateCards } from "./ai";
 import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
 
@@ -85,50 +105,36 @@ Bun.serve({
         if (!username || username.length < 2) return bad("Username must be at least 2 characters");
         if (username.length > 32) return bad("Username is too long");
 
-        const existing = await get<User>("SELECT * FROM users WHERE username = ?", [username]);
+        const existing = await findUserByUsername(username);
         if (existing) return json(existing);
 
-        await run("INSERT INTO users (username) VALUES (?)", [username]);
-        const user = await get<User>("SELECT * FROM users WHERE username = ?", [username]);
+        const user = await createUser(username);
         return json(user, 201);
       }
 
       if (method === "GET" && path.startsWith("/api/users/") && path.endsWith("/decks")) {
         const userId = Number(path.split("/")[3]);
-        const user = await get<User>("SELECT * FROM users WHERE id = ?", [userId]);
+        const user = await findUserById(userId);
         if (!user) return json({ error: "User not found" }, 404);
-        const decks = await all<Deck>(
-          `SELECT d.*,
-                  u.username AS owner_username,
-                  CASE WHEN d.user_id = ? THEN 0 ELSE 1 END AS shared,
-                  (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count
-           FROM decks d
-           JOIN users u ON u.id = d.user_id
-           WHERE d.user_id = ?
-              OR d.id IN (SELECT deck_id FROM deck_shares WHERE user_id = ?)
-           ORDER BY d.created_at DESC`,
-          [userId, userId, userId],
-        );
-        return json({
-          user,
-          decks: decks.map((d) => ({ ...d, shared: Boolean(d.shared), is_owner: !d.shared })),
-        });
+        const decks = await listUserDecks(userId);
+        return json({ user, decks });
       }
 
       if (method === "POST" && path === "/api/import") {
         const parsed = await readImportRequest(req);
         if (!parsed.userId) return bad("userId required");
-        const user = await get<User>("SELECT * FROM users WHERE id = ?", [parsed.userId]);
+        const user = await findUserById(parsed.userId);
         if (!user) return json({ error: "User not found" }, 404);
         if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
         const name = parsed.title || parsed.name || "Imported set";
-        const id = await insertId(
-          "INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)",
-          [parsed.userId, name, parsed.sourceLang, parsed.targetLang],
-        );
-        const result = await insertImported(id, parsed.cards, parsed.title);
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [id]);
-        console.log("[quiz-words] import new", { deckId: id, added: result.added, skipped: result.skipped, title: parsed.title });
+        const deck = await createDeck({
+          userId: parsed.userId,
+          name,
+          sourceLang: parsed.sourceLang,
+          targetLang: parsed.targetLang,
+        });
+        const result = await insertImported(deck.id, parsed.cards, parsed.title);
+        console.log("[quiz-words] import new", { deckId: deck.id, added: result.added, skipped: result.skipped, title: parsed.title });
         return json({ deck, cards: result.cards, added: result.added, skipped: result.skipped, title: parsed.title }, 201);
       }
 
@@ -144,25 +150,26 @@ Bun.serve({
         if (!name) return bad("Deck name required");
         const sourceLang = (body.sourceLang || "auto").trim();
         const targetLang = (body.targetLang || "en").trim();
-        const id = await insertId(
-          "INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)",
-          [body.userId, name, sourceLang, targetLang],
-        );
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [id]);
+        const deck = await createDeck({
+          userId: body.userId,
+          name,
+          sourceLang,
+          targetLang,
+        });
         return json(deck, 201);
       }
 
       const deckMatch = path.match(/^\/api\/decks\/(\d+)$/);
       if (deckMatch && method === "GET") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        const deck = await findDeckById(Number(deckMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
         if (actorId && !(await canAccessDeck(deck, actorId))) {
           return json({ error: "You do not have access to this deck" }, 403);
         }
-        const owner = await get<User>("SELECT * FROM users WHERE id = ?", [deck.user_id]);
+        const owner = await findUserById(deck.user_id);
         const sharedWith = await listShares(deck.id);
-        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+        const cards = await listCards(deck.id, "desc");
         return json({
           deck: {
             ...deck,
@@ -177,32 +184,28 @@ Bun.serve({
 
       if (deckMatch && method === "DELETE") {
         const actorId = Number(url.searchParams.get("userId") || 0);
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        const deck = await findDeckById(Number(deckMatch[1]));
         if (!deck) return notFound();
         if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can delete this deck" }, 403);
-        await run("DELETE FROM cards WHERE deck_id = ?", [deck.id]);
-        await run("DELETE FROM deck_shares WHERE deck_id = ?", [deck.id]);
-        await run("DELETE FROM decks WHERE id = ?", [deck.id]);
+        await deleteDeck(deck.id);
         return json({ ok: true });
       }
 
       if (deckMatch && method === "PATCH") {
         const body = await readJson<{ name?: string; sourceLang?: string; targetLang?: string }>(req);
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(deckMatch[1])]);
+        const deck = await findDeckById(Number(deckMatch[1]));
         if (!deck) return notFound();
-        await run("UPDATE decks SET name = ?, source_lang = ?, target_lang = ? WHERE id = ?", [
-          body.name?.trim() || deck.name,
-          body.sourceLang || deck.source_lang,
-          body.targetLang || deck.target_lang,
-          deck.id,
-        ]);
-        const updated = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
+        const updated = await updateDeck(deck.id, {
+          name: body.name?.trim() || deck.name,
+          source_lang: body.sourceLang || deck.source_lang,
+          target_lang: body.targetLang || deck.target_lang,
+        });
         return json(updated);
       }
 
       const shareMatch = path.match(/^\/api\/decks\/(\d+)\/share$/);
       if (shareMatch && method === "POST") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(shareMatch[1])]);
+        const deck = await findDeckById(Number(shareMatch[1]));
         if (!deck) return notFound();
         const body = await readJson<{ userId?: number; usernames?: string[]; username?: string }>(req);
         if (!body.userId || deck.user_id !== body.userId) {
@@ -214,7 +217,7 @@ Bun.serve({
         const added: string[] = [];
         const skipped: string[] = [];
         for (const name of names) {
-          const target = await get<User>("SELECT * FROM users WHERE username = ?", [name]);
+          const target = await findUserByUsername(name);
           if (!target) {
             missing.push(name);
             continue;
@@ -223,12 +226,9 @@ Bun.serve({
             skipped.push(name);
             continue;
           }
-          try {
-            await run("INSERT INTO deck_shares (deck_id, user_id) VALUES (?, ?)", [deck.id, target.id]);
-            added.push(target.username);
-          } catch {
-            skipped.push(target.username);
-          }
+          const inserted = await addShare(deck.id, target.id);
+          if (inserted) added.push(target.username);
+          else skipped.push(target.username);
         }
         const sharedWith = await listShares(deck.id);
         if (missing.length && added.length === 0) {
@@ -243,26 +243,26 @@ Bun.serve({
       }
 
       if (shareMatch && method === "DELETE") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(shareMatch[1])]);
+        const deck = await findDeckById(Number(shareMatch[1]));
         if (!deck) return notFound();
         const body = await readJson<{ userId?: number; username?: string }>(req);
         if (!body.userId || !body.username?.trim()) return bad("userId and username required");
-        const target = await get<User>("SELECT * FROM users WHERE username = ?", [body.username.trim()]);
+        const target = await findUserByUsername(body.username.trim());
         if (!target) return json({ error: "User not found" }, 404);
         const isOwner = deck.user_id === body.userId;
         const isSelf = target.id === body.userId;
         if (!isOwner && !isSelf) return json({ error: "Not allowed" }, 403);
-        await run("DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?", [deck.id, target.id]);
+        await removeShare(deck.id, target.id);
         return json({ shared_with: await listShares(deck.id) });
       }
 
       const dedupeMatch = path.match(/^\/api\/decks\/(\d+)\/dedupe$/);
       if (dedupeMatch && method === "POST") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(dedupeMatch[1])]);
+        const deck = await findDeckById(Number(dedupeMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
         if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
-        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id ASC", [deck.id]);
+        const cards = await listCards(deck.id, "asc");
         const keep = new Map<string, Card>();
         const removeIds: number[] = [];
         for (const card of cards) {
@@ -281,17 +281,15 @@ Bun.serve({
             removeIds.push(card.id);
           }
         }
-        for (const id of removeIds) {
-          await run("DELETE FROM cards WHERE id = ?", [id]);
-        }
-        const remaining = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+        await deleteCardsByIds(removeIds);
+        const remaining = await listCards(deck.id, "desc");
         console.log("[quiz-words] dedupe", { deckId: deck.id, removed: removeIds.length });
         return json({ deck, cards: remaining, removed: removeIds.length });
       }
 
       const extractMatch = path.match(/^\/api\/decks\/(\d+)\/extract-photo$/);
       if (method === "POST" && extractMatch) {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(extractMatch[1])]);
+        const deck = await findDeckById(Number(extractMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
         if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
@@ -311,19 +309,19 @@ Bun.serve({
 
       const generateMatch = path.match(/^\/api\/decks\/(\d+)\/generate$/);
       if (generateMatch && method === "POST") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(generateMatch[1])]);
+        const deck = await findDeckById(Number(generateMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
         if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
         const body = await readJson<{ words?: string[] }>(req);
         const words = uniqueIncoming(body.words || []);
         if (words.length === 0) return bad("Add at least one word");
-        const existing = await all<{ word: string }>("SELECT word FROM cards WHERE deck_id = ?", [deck.id]);
-        const taken = new Set(existing.map((row) => row.word.trim().toLowerCase()));
+        const existing = await listCardWords(deck.id);
+        const taken = new Set(existing.map((word) => word.trim().toLowerCase()));
         const novel = words.filter((w) => !taken.has(w.toLowerCase()));
         let skipped = words.length - novel.length;
         if (novel.length === 0) {
-          const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
+          const cards = await listCards(deck.id, "desc");
           return json({ deck, cards, added: 0, skipped });
         }
         const generated = await generateCards({
@@ -332,31 +330,33 @@ Bun.serve({
           targetLang: deck.target_lang,
         });
         if (deck.source_lang === "auto" && generated.sourceLang && generated.sourceLang !== "und") {
-          await run("UPDATE decks SET source_lang = ? WHERE id = ?", [generated.sourceLang, deck.id]);
+          await updateDeck(deck.id, { source_lang: generated.sourceLang });
         }
         let added = 0;
         for (const card of generated.cards) {
           if (taken.has(card.word.trim().toLowerCase())) continue;
-          try {
-            await run(
-              `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              [deck.id, card.word, card.translation, card.sentence, card.sentenceTranslation, card.notes],
-            );
+          const ok = await insertCard(deck.id, {
+            word: card.word,
+            translation: card.translation,
+            sentence: card.sentence,
+            sentenceTranslation: card.sentenceTranslation,
+            notes: card.notes,
+          });
+          if (ok) {
             taken.add(card.word.trim().toLowerCase());
             added += 1;
-          } catch {
+          } else {
             skipped += 1;
           }
         }
-        const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deck.id]);
-        const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
+        const cards = await listCards(deck.id, "desc");
+        const updatedDeck = await findDeckById(deck.id);
         return json({ deck: updatedDeck, cards, added, skipped });
       }
 
       const importMatch = path.match(/^\/api\/decks\/(\d+)\/import$/);
       if (importMatch && method === "POST") {
-        const deck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [Number(importMatch[1])]);
+        const deck = await findDeckById(Number(importMatch[1]));
         if (!deck) return notFound();
         const parsed = await readImportRequest(req);
         const actorId = parsed.userId || Number(url.searchParams.get("userId") || 0);
@@ -364,25 +364,23 @@ Bun.serve({
         if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
         const result = await insertImported(deck.id, parsed.cards, parsed.title);
         if (parsed.title && (deck.name === "Untitled" || deck.name.toLowerCase() === "imported set")) {
-          await run("UPDATE decks SET name = ? WHERE id = ?", [parsed.title, deck.id]);
+          await updateDeck(deck.id, { name: parsed.title });
         }
-        const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
+        const updatedDeck = await findDeckById(deck.id);
         console.log("[quiz-words] import", { deckId: deck.id, added: result.added, skipped: result.skipped, title: parsed.title });
         return json({ deck: updatedDeck, cards: result.cards, added: result.added, skipped: result.skipped, title: parsed.title });
       }
 
       const cardMatch = path.match(/^\/api\/cards\/(\d+)$/);
       if (cardMatch && method === "DELETE") {
-        await run("DELETE FROM cards WHERE id = ?", [Number(cardMatch[1])]);
+        await deleteCardById(Number(cardMatch[1]));
         return json({ ok: true });
       }
 
       const reviewMatch = path.match(/^\/api\/cards\/(\d+)\/review$/);
       if (reviewMatch && method === "POST") {
         const body = await readJson<{ known?: boolean }>(req);
-        const field = body.known ? "known_count" : "unknown_count";
-        await run(`UPDATE cards SET ${field} = ${field} + 1 WHERE id = ?`, [Number(reviewMatch[1])]);
-        const card = await get<Card>("SELECT * FROM cards WHERE id = ?", [Number(reviewMatch[1])]);
+        const card = await incrementReview(Number(reviewMatch[1]), Boolean(body.known));
         if (!card) return notFound();
         return json(card);
       }
@@ -431,18 +429,9 @@ function parseUsernames(values: string[]) {
   return out;
 }
 
-async function listShares(deckId: number) {
-  return all<{ id: number; username: string }>(
-    `SELECT u.id, u.username FROM deck_shares s
-     JOIN users u ON u.id = s.user_id
-     WHERE s.deck_id = ? ORDER BY u.username COLLATE NOCASE`,
-    [deckId],
-  );
-}
-
 async function insertImported(deckId: number, incoming: ImportedCard[], title = "") {
-  const existing = await all<{ word: string }>("SELECT word FROM cards WHERE deck_id = ?", [deckId]);
-  const taken = new Set(existing.map((row) => row.word.trim().toLowerCase()));
+  const existing = await listCardWords(deckId);
+  const taken = new Set(existing.map((word) => word.trim().toLowerCase()));
   let added = 0;
   let skipped = 0;
   const note = title || "";
@@ -452,26 +441,21 @@ async function insertImported(deckId: number, incoming: ImportedCard[], title = 
       skipped += 1;
       continue;
     }
-    try {
-      await run(
-        `INSERT INTO cards (deck_id, word, translation, sentence, sentence_translation, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          deckId,
-          card.word,
-          card.translation,
-          card.sentence || "",
-          card.sentenceTranslation || "",
-          card.notes || note,
-        ],
-      );
+    const ok = await insertCard(deckId, {
+      word: card.word,
+      translation: card.translation,
+      sentence: card.sentence || "",
+      sentenceTranslation: card.sentenceTranslation || "",
+      notes: card.notes || note,
+    });
+    if (ok) {
       taken.add(key);
       added += 1;
-    } catch {
+    } else {
       skipped += 1;
     }
   }
-  const cards = await all<Card>("SELECT * FROM cards WHERE deck_id = ? ORDER BY id DESC", [deckId]);
+  const cards = await listCards(deckId, "desc");
   return { cards, added, skipped };
 }
 
@@ -529,11 +513,3 @@ async function readImportRequest(req: Request) {
   return { userId, name, sourceLang, targetLang, title, cards };
 }
 
-async function canAccessDeck(deck: Deck, userId: number) {
-  if (deck.user_id === userId) return true;
-  const row = await get<{ deck_id: number }>(
-    "SELECT deck_id FROM deck_shares WHERE deck_id = ? AND user_id = ?",
-    [deck.id, userId],
-  );
-  return Boolean(row);
-}
