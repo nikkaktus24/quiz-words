@@ -1,8 +1,7 @@
 # Portainer / production: pull images only (no build context).
 # Stack env:
 #   DOCKER_USERNAME, OPENROUTER_API_KEY
-#   API_URL — public origin the browser should call, e.g. https://app.example.com
-#   Leave API_URL empty to use same-origin /api on the web host.
+#   API_URL — public API origin the browser should call, e.g. https://api.example.com/quiz
 
 services:
   mongo:

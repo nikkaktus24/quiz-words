@@ -3,19 +3,7 @@ import type { Card, Deck, User } from "./types";
 function apiBase() {
   const runtime = typeof window !== "undefined" ? window.__API_URL__ : "";
   const fromEnv = import.meta.env.VITE_API_URL ?? "";
-  const configured = String(runtime || fromEnv || "").trim().replace(/\/$/, "");
-  if (!configured) return "";
-  if (typeof window === "undefined") return configured;
-  try {
-    const resolved = new URL(configured, window.location.origin);
-    if (resolved.origin !== window.location.origin && !import.meta.env.DEV) {
-      console.warn("[quiz-words] cross-origin API_URL ignored; using same-origin /api", configured);
-      return "";
-    }
-    return configured;
-  } catch {
-    return configured;
-  }
+  return String(runtime || fromEnv || "").trim().replace(/\/$/, "");
 }
 
 function apiUrl(path: string) {

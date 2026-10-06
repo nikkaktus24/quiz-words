@@ -36,13 +36,13 @@ App: http://localhost:8080
 API: http://localhost:3000  
 Data is stored in MongoDB (`mongo-data` volume). Local `bun run dev` expects MongoDB at `mongodb://127.0.0.1:27017`.
 
-Nginx serves the UI. Leave **`API_URL` empty** in Docker so the browser uses same-origin `/api`. Local Vite can leave it empty and use the `/api` proxy.
+Nginx serves the UI. Set **`API_URL`** to the public API origin (for example `https://api.example.com/quiz`). Local Vite can leave it empty and use the `/api` proxy.
 
 On Portainer, deploy **`docker-compose.stack.yml`**. Set:
 
 - `DOCKER_USERNAME`
 - `OPENROUTER_API_KEY`
-- `API_URL` — leave empty, or set the public app origin if the UI is on a different host
+- `API_URL` — public API origin, e.g. `https://api.example.com/quiz`
 
 ## GitHub Actions
 
