@@ -1,14 +1,27 @@
 import { all, get, insertId, run, type Card, type Deck, type User } from "./db";
 import { extractWordsFromImage, generateCards } from "./ai";
-import { importFromQuizletUrl, parseImportPayload, type ImportedCard } from "./import";
+import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
-const ORIGIN = process.env.WEB_ORIGIN || "http://localhost:5173";
+const ORIGIN = (process.env.WEB_ORIGIN || "*").trim() || "*";
 
-function allowOrigin(req?: Request) {
-  if (ORIGIN === "*") return req?.headers.get("Origin") || "*";
+function allowOrigin(req: Request) {
+  const requestOrigin = req.headers.get("Origin");
+  if (ORIGIN === "*") return requestOrigin || "*";
   return ORIGIN;
+}
+
+function corsHeaders(req: Request): Record<string, string> {
+  const requested = req.headers.get("Access-Control-Request-Headers");
+  return {
+    "Access-Control-Allow-Origin": allowOrigin(req),
+    "Access-Control-Allow-Methods": "GET,HEAD,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers":
+      requested || "Content-Type, Authorization, Accept, X-Requested-With",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin, Access-Control-Request-Headers",
+  };
 }
 
 function jsonBody(data: unknown, status = 200, req?: Request) {
@@ -16,9 +29,7 @@ function jsonBody(data: unknown, status = 200, req?: Request) {
     status,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": allowOrigin(req),
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      ...(req ? corsHeaders(req) : {}),
     },
   });
 }
@@ -27,11 +38,17 @@ function cors(req: Request) {
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": allowOrigin(req),
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      ...corsHeaders(req),
+      "Content-Length": "0",
     },
   });
+}
+
+function apiPath(pathname: string) {
+  const idx = pathname.indexOf("/api/");
+  if (idx >= 0) return pathname.slice(idx);
+  if (pathname === "/api" || pathname.endsWith("/api")) return "/api";
+  return pathname;
 }
 
 async function readJson<T>(req: Request): Promise<T> {
@@ -50,7 +67,7 @@ Bun.serve({
     const bad = (message: string) => json({ error: message }, 400);
 
     const url = new URL(req.url);
-    const path = url.pathname;
+    const path = apiPath(url.pathname);
     const method = req.method;
     const started = Date.now();
     if (path.includes("generate") || path.includes("extract-photo") || path.includes("import")) {
@@ -103,7 +120,7 @@ Bun.serve({
         if (!parsed.userId) return bad("userId required");
         const user = await get<User>("SELECT * FROM users WHERE id = ?", [parsed.userId]);
         if (!user) return json({ error: "User not found" }, 404);
-        if (parsed.cards.length === 0) return bad("No cards found in that file or Quizlet link.");
+        if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
         const name = parsed.title || parsed.name || "Imported set";
         const id = await insertId(
           "INSERT INTO decks (user_id, name, source_lang, target_lang) VALUES (?, ?, ?, ?)",
@@ -344,9 +361,9 @@ Bun.serve({
         const parsed = await readImportRequest(req);
         const actorId = parsed.userId || Number(url.searchParams.get("userId") || 0);
         if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can import cards" }, 403);
-        if (parsed.cards.length === 0) return bad("No cards found in that file or Quizlet link.");
+        if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
         const result = await insertImported(deck.id, parsed.cards, parsed.title);
-        if (parsed.title && (deck.name === "Untitled" || deck.name.toLowerCase() === "quizlet")) {
+        if (parsed.title && (deck.name === "Untitled" || deck.name.toLowerCase() === "imported set")) {
           await run("UPDATE decks SET name = ? WHERE id = ?", [parsed.title, deck.id]);
         }
         const updatedDeck = await get<Deck>("SELECT * FROM decks WHERE id = ?", [deck.id]);
@@ -428,7 +445,7 @@ async function insertImported(deckId: number, incoming: ImportedCard[], title = 
   const taken = new Set(existing.map((row) => row.word.trim().toLowerCase()));
   let added = 0;
   let skipped = 0;
-  const note = title ? `Quizlet: ${title}` : "";
+  const note = title || "";
   for (const card of incoming) {
     const key = card.word.trim().toLowerCase();
     if (taken.has(key)) {
@@ -481,7 +498,7 @@ async function readImportRequest(req: Request) {
     } else if (raw) {
       cards = parseImportPayload(raw);
     } else if (link) {
-      const fetched = await importFromQuizletUrl(link);
+      const fetched = await importFromSetUrl(link);
       cards = fetched.cards;
       title = fetched.title;
     }
@@ -501,7 +518,7 @@ async function readImportRequest(req: Request) {
     sourceLang = (body.sourceLang || "auto").trim();
     targetLang = (body.targetLang || "en").trim();
     if (body.url?.trim()) {
-      const fetched = await importFromQuizletUrl(body.url.trim());
+      const fetched = await importFromSetUrl(body.url.trim());
       cards = fetched.cards;
       title = fetched.title;
     } else {

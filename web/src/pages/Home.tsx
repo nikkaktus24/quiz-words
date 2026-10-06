@@ -89,7 +89,7 @@ export function Home() {
       <div className="home-split">
         <section className="panel">
           <h2>Create a set</h2>
-          <p className="lede">Name it, pick languages, then add words, a photo, or import from Quizlet.</p>
+          <p className="lede">Name it, pick languages, then add words, a photo, or import from a file or link.</p>
           <form className="stack-form" onSubmit={onCreate}>
             <div>
               <label>Name</label>
@@ -125,7 +125,7 @@ export function Home() {
         </section>
 
         <section className="panel">
-          <h2>Import from Quizlet</h2>
+          <h2>Import a set</h2>
           <p className="lede">Paste a set link, upload JSON, or drop tab-separated terms. Then share it with usernames.</p>
           <ImportPanel busy={importBusy} onSubmit={onImport} />
           {importError && <p className="error">{importError}</p>}
@@ -134,7 +134,7 @@ export function Home() {
 
       <h2 className="terms-heading">Library</h2>
       <div className="grid">
-        {decks.length === 0 && <p className="meta">No sets yet. Create one or import from Quizlet.</p>}
+        {decks.length === 0 && <p className="meta">No sets yet. Create one or import cards from a file or link.</p>}
         {decks.map((d) => (
           <Link key={d.id} className="deck-card" to={`/decks/${d.id}`}>
             <h3>{d.name}</h3>

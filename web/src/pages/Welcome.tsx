@@ -28,9 +28,9 @@ export function Welcome() {
     <div className="welcome">
       <form className="welcome-card" onSubmit={onSubmit}>
         <div className="eyebrow">Study sets</div>
-        <h1>Flashcards, Learn, and Test — like Quizlet, for your words.</h1>
+        <h1>Flashcards, Learn, and Test for your words.</h1>
         <p className="lede">
-          Type words, photograph a list, or import a Quizlet set. Then share it by username.
+          Type words, photograph a list, or import a set from a link or JSON. Then share it by username.
         </p>
         <label htmlFor="username">Username</label>
         <input

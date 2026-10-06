@@ -1,6 +1,6 @@
 # quiz-words
 
-A Quizlet-style studio: create or import a set, then study with Flashcards, Learn, and Test. Type words, photograph a list, or paste a Quizlet link / JSON export. Share sets by username.
+A vocabulary studio: create or import a set, then study with Flashcards, Learn, and Test. Type words, photograph a list, or paste a set link / JSON export. Share sets by username.
 
 **Stack:** React UI · Bun API · libSQL · OpenRouter (`openai/gpt-5-nano`)
 

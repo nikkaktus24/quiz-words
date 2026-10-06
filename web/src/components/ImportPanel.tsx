@@ -64,13 +64,13 @@ export function ImportPanel({ busy, onSubmit, showLangs, sourceLang = "auto", ta
 
       <form className="row" onSubmit={sendUrl}>
         <div className="grow">
-          <label htmlFor="quizlet-url">Quizlet link</label>
+          <label htmlFor="set-url">Set link</label>
           <input
-            id="quizlet-url"
+            id="set-url"
             className="field"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://quizlet.com/123456789/my-set"
+            placeholder="https://example.com/123456789/my-set"
             disabled={busy}
           />
         </div>
@@ -96,7 +96,7 @@ export function ImportPanel({ busy, onSubmit, showLangs, sourceLang = "auto", ta
           </div>
         ) : (
           <>
-            Drop a Quizlet JSON export, or a tab-separated terms file
+            Drop a JSON export, or a tab-separated terms file
             {fileName ? <p className="meta">{fileName}</p> : null}
           </>
         )}

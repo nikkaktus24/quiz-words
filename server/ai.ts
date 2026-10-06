@@ -132,7 +132,7 @@ export async function generateCards(opts: {
       ? "Detect the source language of the words."
       : `Source language code: ${opts.sourceLang}.`;
 
-  const system = `You are a language tutor making Quizlet-style study cards.
+  const system = `You are a language tutor making study cards.
 Return JSON only:
 {"sourceLang":"ISO 639-1 code","cards":[{"word":"","translation":"","sentence":"","sentenceTranslation":"","notes":""}]}
 Rules:

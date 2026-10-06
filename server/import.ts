@@ -37,29 +37,27 @@ export function parseImportPayload(input: unknown): ImportedCard[] {
   return [];
 }
 
-export function quizletSetId(url: string) {
-  const match = url.trim().match(/quizlet\.com\/(?:[a-z]{2}\/)?(\d+)/i);
+export function remoteSetId(url: string) {
+  const match = url.trim().match(/(?:https?:\/\/)?(?:www\.)?quizlet\.com\/(?:[a-z]{2}\/)?(\d+)/i);
   return match?.[1] ?? "";
 }
 
-export async function importFromQuizletUrl(rawUrl: string): Promise<{ title: string; cards: ImportedCard[] }> {
-  const id = quizletSetId(rawUrl);
-  if (!id) throw new Error("That does not look like a Quizlet set URL.");
+export async function importFromSetUrl(rawUrl: string): Promise<{ title: string; cards: ImportedCard[] }> {
+  const id = remoteSetId(rawUrl);
+  if (!id) throw new Error("That does not look like a study-set URL.");
 
-  const fromApi = await fetchQuizletApi(id);
-  if (fromApi.length > 0) return { title: `Quizlet ${id}`, cards: fromApi };
+  const fromApi = await fetchRemoteSetApi(id);
+  if (fromApi.length > 0) return { title: "Imported set", cards: fromApi };
 
   try {
     const html = await fetchPage(`https://quizlet.com/${id}`);
     const fromHtml = extractFromHtml(html);
     if (fromHtml.cards.length > 0) return fromHtml;
   } catch (err) {
-    console.error("[quiz-words] quizlet html", err);
+    console.error("[quiz-words] set-url html", err);
   }
 
-  throw new Error(
-    "Quizlet blocked that link (login wall or captcha). Export JSON or paste tab-separated terms instead.",
-  );
+  throw new Error("Could not read that set from the link. Upload a JSON file or paste tab-separated terms instead.");
 }
 
 async function fetchPage(url: string) {
@@ -73,7 +71,7 @@ async function fetchPage(url: string) {
     redirect: "follow",
     signal: AbortSignal.timeout(25000),
   });
-  if (!res.ok) throw new Error(`Quizlet responded ${res.status}. Upload a JSON export instead.`);
+  if (!res.ok) throw new Error(`That set page responded ${res.status}. Upload a JSON file instead.`);
   return res.text();
 }
 
@@ -106,7 +104,7 @@ function extractFromHtml(html: string): { title: string; cards: ImportedCard[] }
   return { title, cards: [] };
 }
 
-async function fetchQuizletApi(id: string): Promise<ImportedCard[]> {
+async function fetchRemoteSetApi(id: string): Promise<ImportedCard[]> {
   const endpoint =
     `https://quizlet.com/webapi/3.4/studiable-item-documents?filters[studiableContainerId]=${id}` +
     `&filters[studiableContainerType]=1&perPage=1000`;
@@ -123,7 +121,7 @@ async function fetchQuizletApi(id: string): Promise<ImportedCard[]> {
     const json = await res.json();
     return uniqueCards(collectCards(json));
   } catch (err) {
-    console.error("[quiz-words] quizlet api", err);
+    console.error("[quiz-words] set-url api", err);
     return [];
   }
 }
