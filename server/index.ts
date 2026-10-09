@@ -192,11 +192,15 @@ Bun.serve({
       }
 
       if (deckMatch && method === "PATCH") {
-        const body = await readJson<{ name?: string; sourceLang?: string; targetLang?: string }>(req);
+        const body = await readJson<{ userId?: number; name?: string; sourceLang?: string; targetLang?: string }>(req);
         const deck = await findDeckById(Number(deckMatch[1]));
         if (!deck) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || body.userId || 0);
+        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
+        const name = body.name?.trim();
+        if (body.name !== undefined && !name) return bad("Deck name required");
         const updated = await updateDeck(deck.id, {
-          name: body.name?.trim() || deck.name,
+          name: name || deck.name,
           source_lang: body.sourceLang || deck.source_lang,
           target_lang: body.targetLang || deck.target_lang,
         });

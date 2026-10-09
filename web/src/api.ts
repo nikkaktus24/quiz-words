@@ -76,6 +76,14 @@ export const api = {
     const q = userId ? `?userId=${userId}` : "";
     return request<{ ok: boolean }>(`/api/decks/${id}${q}`, { method: "DELETE" });
   },
+  updateDeck(id: number, body: { userId?: number; name?: string; sourceLang?: string; targetLang?: string }) {
+    const q = body.userId ? `?userId=${body.userId}` : "";
+    return request<Deck>(`/api/decks/${id}${q}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
   share(deckId: number, userId: number, usernames: string[]) {
     return request<{
       shared_with: { id: number; username: string }[];

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
 import { ModeTiles } from "../components/ModeNav";
+import { RenameName } from "../components/RenameName";
 import { getSavedUser } from "../session";
 import { langLabel, type Card, type Deck } from "../types";
 
@@ -209,7 +210,20 @@ export function DeckPage() {
           <Link className="meta" to="/home">
             ← Your sets
           </Link>
-          <h1 style={{ marginTop: 6 }}>{deck.name}</h1>
+          {owner ? (
+            <div style={{ marginTop: 6 }}>
+              <RenameName
+                as="h1"
+                name={deck.name}
+                onSave={async (name) => {
+                  const updated = await api.updateDeck(deck.id, { userId: user.id, name });
+                  setDeck((current) => (current ? { ...current, name: updated.name } : current));
+                }}
+              />
+            </div>
+          ) : (
+            <h1 style={{ marginTop: 6 }}>{deck.name}</h1>
+          )}
           <p className="meta">
             {langLabel(deck.source_lang)} → {langLabel(deck.target_lang)} · {cards.length} term
             {cards.length === 1 ? "" : "s"}

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
+import { RenameName } from "../components/RenameName";
 import { clearUser, getSavedUser } from "../session";
 import { LANGS, langLabel, type Deck } from "../types";
 
@@ -136,13 +137,25 @@ export function Home() {
       <div className="grid">
         {decks.length === 0 && <p className="meta">No sets yet. Create one or import cards from a file or link.</p>}
         {decks.map((d) => (
-          <Link key={d.id} className="deck-card" to={`/decks/${d.id}`}>
-            <h3>{d.name}</h3>
-            <p className="meta">
-              {langLabel(d.source_lang)} → {langLabel(d.target_lang)} · {d.card_count ?? 0} terms
-              {d.shared ? ` · from ${d.owner_username}` : ""}
-            </p>
-          </Link>
+          <article key={d.id} className="deck-card">
+            {d.is_owner !== false && !d.shared ? (
+              <RenameName
+                name={d.name}
+                onSave={async (name) => {
+                  const updated = await api.updateDeck(d.id, { userId: user.id, name });
+                  setDecks((list) => list.map((item) => (item.id === d.id ? { ...item, name: updated.name } : item)));
+                }}
+              />
+            ) : (
+              <h3>{d.name}</h3>
+            )}
+            <Link className="deck-card-body" to={`/decks/${d.id}`}>
+              <p className="meta">
+                {langLabel(d.source_lang)} → {langLabel(d.target_lang)} · {d.card_count ?? 0} terms
+                {d.shared ? ` · from ${d.owner_username}` : ""}
+              </p>
+            </Link>
+          </article>
         ))}
       </div>
     </div>

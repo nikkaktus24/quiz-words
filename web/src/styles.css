@@ -222,7 +222,49 @@ label {
 }
 
 .deck-card h3 {
+  margin-bottom: 0;
+}
+
+.deck-card-body {
+  display: block;
+}
+
+.rename-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 8px;
+}
+
+.rename-title h1,
+.rename-title h3 {
+  margin: 0;
+  min-width: 0;
+}
+
+.rename-title .ghost {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.rename-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rename-form .field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.rename-form .error {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .meta {
