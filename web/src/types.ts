@@ -25,6 +25,32 @@ export type Card = {
   known_count: number;
   unknown_count: number;
   created_at: string;
+  source_lang?: string;
+  deck_name?: string;
+};
+
+export type RuleCheck = {
+  id: number;
+  rule_id: number;
+  kind: "mcq" | "write" | "tf";
+  prompt: string;
+  answer: string;
+  options: string[];
+  explanation: string;
+  known_count: number;
+  unknown_count: number;
+  created_at: string;
+};
+
+export type Rule = {
+  id: number;
+  user_id: number;
+  title: string;
+  markup: string;
+  prompt: string;
+  created_at: string;
+  check_count?: number;
+  checks?: RuleCheck[];
 };
 
 export const LANGS = [

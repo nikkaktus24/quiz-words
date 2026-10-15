@@ -10,9 +10,24 @@ type Props = {
   sourceLang?: string;
   targetLang?: string;
   onLangs?: (source: string, target: string) => void;
+  deferFile?: boolean;
+  stagedLabel?: string;
+  onStage?: (payload: ImportSubmit, label: string) => void;
+  onClearStage?: () => void;
 };
 
-export function ImportPanel({ busy, onSubmit, showLangs, sourceLang = "auto", targetLang = "en", onLangs }: Props) {
+export function ImportPanel({
+  busy,
+  onSubmit,
+  showLangs,
+  sourceLang = "auto",
+  targetLang = "en",
+  onLangs,
+  deferFile,
+  stagedLabel,
+  onStage,
+  onClearStage,
+}: Props) {
   const [url, setUrl] = useState("");
   const [paste, setPaste] = useState("");
   const [fileName, setFileName] = useState("");
@@ -32,7 +47,12 @@ export function ImportPanel({ busy, onSubmit, showLangs, sourceLang = "auto", ta
   async function onFile(file: File) {
     setFileName(file.name);
     const text = await file.text();
-    await onSubmit(parseClientPayload(text));
+    const payload = parseClientPayload(text);
+    if (deferFile && onStage) {
+      onStage(payload, file.name);
+      return;
+    }
+    await onSubmit(payload);
   }
 
   return (
@@ -96,8 +116,29 @@ export function ImportPanel({ busy, onSubmit, showLangs, sourceLang = "auto", ta
           </div>
         ) : (
           <>
-            Drop a JSON export, or a tab-separated terms file
-            {fileName ? <p className="meta">{fileName}</p> : null}
+            Drop a JSON export, or a tab-separated terms file. The file name is not used as the set or card title.
+            {fileName || stagedLabel ? (
+              <p className="meta">
+                File attached: {stagedLabel || fileName}
+                {onClearStage ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="linkish"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setFileName("");
+                        onClearStage();
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </>
         )}
       </label>

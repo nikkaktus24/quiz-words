@@ -27,6 +27,26 @@ type CardDoc = {
   created_at: string;
 };
 type ShareDoc = { deck_id: number; user_id: number; created_at: string };
+type RuleDoc = {
+  id: number;
+  user_id: number;
+  title: string;
+  markup: string;
+  prompt: string;
+  created_at: string;
+};
+type CheckDoc = {
+  id: number;
+  rule_id: number;
+  kind: "mcq" | "write" | "tf";
+  prompt: string;
+  answer: string;
+  options: string[];
+  explanation: string;
+  known_count: number;
+  unknown_count: number;
+  created_at: string;
+};
 
 const mongo = new MongoClient(uri);
 let database: Db;
@@ -35,6 +55,8 @@ let users: Collection<UserDoc>;
 let decks: Collection<DeckDoc>;
 let cards: Collection<CardDoc>;
 let shares: Collection<ShareDoc>;
+let rules: Collection<RuleDoc>;
+let checks: Collection<CheckDoc>;
 
 async function waitForDb() {
   const deadline = Date.now() + 120_000;
@@ -66,6 +88,8 @@ users = database.collection("users");
 decks = database.collection("decks");
 cards = database.collection("cards");
 shares = database.collection("deck_shares");
+rules = database.collection("rules");
+checks = database.collection("rule_checks");
 
 await users.createIndex({ id: 1 }, { unique: true });
 await users.createIndex({ username_lc: 1 }, { unique: true });
@@ -76,6 +100,10 @@ await cards.createIndex({ deck_id: 1, word_lc: 1 }, { unique: true });
 await cards.createIndex({ deck_id: 1, id: -1 });
 await shares.createIndex({ deck_id: 1, user_id: 1 }, { unique: true });
 await shares.createIndex({ user_id: 1 });
+await rules.createIndex({ id: 1 }, { unique: true });
+await rules.createIndex({ user_id: 1 });
+await checks.createIndex({ id: 1 }, { unique: true });
+await checks.createIndex({ rule_id: 1 });
 
 function now() {
   return new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -313,6 +341,150 @@ export async function canAccessDeck(deck: Deck, userId: number) {
   return Boolean(row);
 }
 
+export async function listStudyCards(userId: number, deckIds: number[]) {
+  const uniqueIds = [...new Set(deckIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const allowed: number[] = [];
+  for (const id of uniqueIds) {
+    const deck = await findDeckById(id);
+    if (deck && (await canAccessDeck(deck, userId))) allowed.push(id);
+  }
+  if (!allowed.length) return { decks: [] as Deck[], cards: [] as StudyCard[], source_lang: "auto", target_lang: "en" };
+  const deckDocs = await decks.find({ id: { $in: allowed } }).toArray();
+  const langByDeck = new Map(deckDocs.map((d) => [d.id, d]));
+  const docs = await cards.find({ deck_id: { $in: allowed } }).toArray();
+  const keep = new Map<string, CardDoc>();
+  for (const doc of docs) {
+    const key = doc.word_lc.trim() || doc.word.trim().toLowerCase();
+    const current = keep.get(key);
+    if (!current) {
+      keep.set(key, doc);
+      continue;
+    }
+    const currentScore = current.known_count + current.unknown_count;
+    const nextScore = doc.known_count + doc.unknown_count;
+    if (nextScore > currentScore || (nextScore === currentScore && doc.id < current.id)) keep.set(key, doc);
+  }
+  const merged = [...keep.values()].map((doc) => {
+    const parent = langByDeck.get(doc.deck_id);
+    return {
+      ...publicCard(doc),
+      source_lang: parent?.source_lang || "auto",
+      deck_name: parent?.name || "",
+    } satisfies StudyCard;
+  });
+  const publicDecks = deckDocs.map(publicDeck);
+  return {
+    decks: publicDecks,
+    cards: merged,
+    source_lang: publicDecks[0]?.source_lang || "auto",
+    target_lang: publicDecks[0]?.target_lang || "en",
+  };
+}
+
+function publicRule(doc: RuleDoc, extras: Partial<Rule> = {}): Rule {
+  return {
+    id: doc.id,
+    user_id: doc.user_id,
+    title: doc.title,
+    markup: doc.markup,
+    prompt: doc.prompt,
+    created_at: doc.created_at,
+    ...extras,
+  };
+}
+
+function publicCheck(doc: CheckDoc): RuleCheck {
+  return {
+    id: doc.id,
+    rule_id: doc.rule_id,
+    kind: doc.kind,
+    prompt: doc.prompt,
+    answer: doc.answer,
+    options: doc.options || [],
+    explanation: doc.explanation,
+    known_count: doc.known_count,
+    unknown_count: doc.unknown_count,
+    created_at: doc.created_at,
+  };
+}
+
+export async function createRule(input: { userId: number; title: string; markup: string; prompt: string }) {
+  const doc: RuleDoc = {
+    id: await nextId("rules"),
+    user_id: input.userId,
+    title: input.title,
+    markup: input.markup,
+    prompt: input.prompt,
+    created_at: now(),
+  };
+  await rules.insertOne(doc);
+  return publicRule(doc);
+}
+
+export async function findRuleById(id: number) {
+  const doc = await rules.findOne({ id });
+  return doc ? publicRule(doc) : null;
+}
+
+export async function listUserRules(userId: number) {
+  const docs = await rules.find({ user_id: userId }).sort({ created_at: -1, id: -1 }).toArray();
+  const counts = docs.length
+    ? await checks
+        .aggregate<{ _id: number; n: number }>([
+          { $match: { rule_id: { $in: docs.map((d) => d.id) } } },
+          { $group: { _id: "$rule_id", n: { $sum: 1 } } },
+        ])
+        .toArray()
+    : [];
+  const countMap = new Map(counts.map((c) => [c._id, c.n]));
+  return docs.map((d) => publicRule(d, { check_count: countMap.get(d.id) ?? 0 }));
+}
+
+export async function deleteRule(id: number) {
+  await checks.deleteMany({ rule_id: id });
+  await rules.deleteOne({ id });
+}
+
+export async function insertRuleChecks(
+  ruleId: number,
+  incoming: Array<{ kind: string; prompt: string; answer: string; options?: string[]; explanation?: string }>,
+) {
+  const out: RuleCheck[] = [];
+  for (const item of incoming) {
+    const kind: RuleCheck["kind"] = item.kind === "mcq" || item.kind === "tf" ? item.kind : "write";
+    const prompt = item.prompt.trim();
+    const answer = String(item.answer ?? "").trim();
+    if (!prompt || !answer) continue;
+    const doc: CheckDoc = {
+      id: await nextId("rule_checks"),
+      rule_id: ruleId,
+      kind,
+      prompt,
+      answer,
+      options: Array.isArray(item.options) ? item.options.map((o) => String(o).trim()).filter(Boolean) : [],
+      explanation: item.explanation?.trim() || "",
+      known_count: 0,
+      unknown_count: 0,
+      created_at: now(),
+    };
+    await checks.insertOne(doc);
+    out.push(publicCheck(doc));
+  }
+  return out;
+}
+
+export async function listRuleChecks(ruleId: number) {
+  const docs = await checks.find({ rule_id: ruleId }).sort({ id: 1 }).toArray();
+  return docs.map(publicCheck);
+}
+
+export async function incrementCheckReview(id: number, known: boolean) {
+  const field = known ? "known_count" : "unknown_count";
+  await checks.updateOne({ id }, { $inc: { [field]: 1 } });
+  const doc = await checks.findOne({ id });
+  return doc ? publicCheck(doc) : null;
+}
+
 function isDuplicate(err: unknown) {
   return typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === 11000;
 }
@@ -339,6 +511,29 @@ export type Card = {
   sentence: string;
   sentence_translation: string;
   notes: string;
+  known_count: number;
+  unknown_count: number;
+  created_at: string;
+};
+export type StudyCard = Card & { source_lang?: string; deck_name?: string };
+export type Rule = {
+  id: number;
+  user_id: number;
+  title: string;
+  markup: string;
+  prompt: string;
+  created_at: string;
+  check_count?: number;
+  checks?: RuleCheck[];
+};
+export type RuleCheck = {
+  id: number;
+  rule_id: number;
+  kind: "mcq" | "write" | "tf";
+  prompt: string;
+  answer: string;
+  options: string[];
+  explanation: string;
   known_count: number;
   unknown_count: number;
   created_at: string;

@@ -1,4 +1,4 @@
-import type { Card, Deck, User } from "./types";
+import type { Card, Deck, Rule, RuleCheck, User } from "./types";
 
 function apiBase() {
   const runtime = typeof window !== "undefined" ? window.__API_URL__ : "";
@@ -144,6 +144,41 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    });
+  },
+  study(userId: number, ids: number[]) {
+    const q = new URLSearchParams({ userId: String(userId), ids: ids.join(",") });
+    return request<{
+      decks: Deck[];
+      cards: Card[];
+      source_lang: string;
+      target_lang: string;
+    }>(`/api/study?${q}`);
+  },
+  userRules(userId: number) {
+    return request<{ rules: Rule[] }>(`/api/users/${userId}/rules`);
+  },
+  createRule(body: { userId: number; title?: string; prompt?: string; image?: File }) {
+    const form = new FormData();
+    form.append("userId", String(body.userId));
+    if (body.title) form.append("title", body.title);
+    if (body.prompt) form.append("prompt", body.prompt);
+    if (body.image) form.append("image", body.image);
+    return request<{ rule: Rule; checks: RuleCheck[] }>("/api/rules", { method: "POST", body: form });
+  },
+  rule(id: number, userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ rule: Rule; checks: RuleCheck[] }>(`/api/rules/${id}${q}`);
+  },
+  deleteRule(id: number, userId?: number) {
+    const q = userId ? `?userId=${userId}` : "";
+    return request<{ ok: boolean }>(`/api/rules/${id}${q}`, { method: "DELETE" });
+  },
+  reviewCheck(id: number, known: boolean) {
+    return request<RuleCheck>(`/api/rule-checks/${id}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ known }),
     });
   },
   importIntoDeck(deckId: number, body: ImportBody) {

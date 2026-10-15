@@ -178,3 +178,84 @@ function uniqueWords(words: string[]) {
   }
   return out.slice(0, 40);
 }
+
+export type GeneratedCheck = {
+  kind: "mcq" | "write" | "tf";
+  prompt: string;
+  answer: string;
+  options: string[];
+  explanation: string;
+};
+
+export async function generateRule(opts: { prompt?: string; imageDataUrl?: string }) {
+  const text = opts.prompt?.trim() || "";
+  if (!text && !opts.imageDataUrl) throw new Error("Write a rule or attach a screenshot.");
+
+  const system = `You are a language tutor. Explain ONE grammar or usage rule clearly.
+Return JSON only:
+{
+  "title":"short title",
+  "markup":"HTML using only p,h2,h3,ul,ol,li,table,thead,tbody,tr,th,td,strong,em,code,br,span,div,blockquote. Allowed class names: ex, ok, no, pair, label, rule-box. No script, styles, iframes, or inline event handlers.",
+  "checks":[
+    {"kind":"mcq","prompt":"question","options":["a","b","c","d"],"answer":"exact matching option","explanation":"one line"},
+    {"kind":"write","prompt":"transform or fill-in","answer":"expected reply","explanation":"one line"},
+    {"kind":"tf","prompt":"true/false statement","answer":"true","explanation":"one line"}
+  ]
+}
+Markup must be visual, not a wall of text:
+- wrap the core pattern in <div class="rule-box">
+- mark correct examples with class ok and incorrect ones with class no
+- highlight inline snippets with class ex
+- use a short table if two forms are being contrasted
+Create 8-12 checks mixing mcq, write, and tf.
+For tf, answer must be "true" or "false".
+For mcq, include 4 options and answer must be one of them.`;
+
+  const content: ChatContent = opts.imageDataUrl
+    ? [
+        { type: "text", text: text || "Explain the language rule shown in this screenshot. Build visual HTML markup and practice checks." },
+        { type: "image_url", image_url: { url: opts.imageDataUrl } },
+      ]
+    : `Explain this language rule and build visual HTML markup plus practice checks:\n${text}`;
+
+  const json = await chat(content, system);
+  const title = String(json.title || "Rule").trim() || "Rule";
+  const markup = sanitizeMarkup(String(json.markup || ""));
+  const checks: GeneratedCheck[] = Array.isArray(json.checks)
+    ? json.checks.map((c: Record<string, unknown>) => {
+        const kind = c.kind === "mcq" || c.kind === "tf" ? c.kind : "write";
+        return {
+          kind,
+          prompt: String(c.prompt ?? "").trim(),
+          answer: String(c.answer ?? "").trim(),
+          options: Array.isArray(c.options) ? c.options.map((o) => String(o).trim()).filter(Boolean) : [],
+          explanation: String(c.explanation ?? "").trim(),
+        };
+      })
+    : [];
+  if (!markup) throw new Error("AI did not return a usable rule explanation.");
+  return { title, markup, checks: checks.filter((c) => c.prompt && c.answer).slice(0, 16) };
+}
+
+const ALLOWED_TAGS = new Set([
+  "p", "h2", "h3", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
+  "strong", "em", "b", "i", "code", "br", "span", "div", "blockquote",
+]);
+const ALLOWED_CLASS = /^(ex|ok|no|pair|label|rule-box)$/;
+
+export function sanitizeMarkup(input: string) {
+  const cleaned = input.replace(/\\n/g, "\n").replace(/\\t/g, " ").replace(/\\r/g, "");
+  return cleaned.replace(/<\/?([a-zA-Z0-9]+)(\s[^>]*)?>/g, (full, tag: string, attrs = "") => {
+    const name = tag.toLowerCase();
+    const closing = full.startsWith("</");
+    if (!ALLOWED_TAGS.has(name)) return "";
+    if (closing) return `</${name}>`;
+    if (name === "br") return "<br/>";
+    const cls = /class\s*=\s*["']([^"']+)["']/i.exec(attrs);
+    const safe = (cls?.[1] || "")
+      .split(/\s+/)
+      .filter((c) => ALLOWED_CLASS.test(c))
+      .join(" ");
+    return safe ? `<${name} class="${safe}">` : `<${name}>`;
+  });
+}

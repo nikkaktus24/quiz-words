@@ -1,19 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ModeNav } from "../components/ModeNav";
+import { SpeakButton } from "../components/SpeakButton";
 import { answersMatch, buildTest, questionPoints, shuffle, type TestQuestion } from "../lib/study";
-import { getSavedUser } from "../session";
-import type { Card, Deck } from "../types";
+import { useStudyPack } from "../lib/useStudyPack";
+import type { Card } from "../types";
 
 type Answer = { correct: number; total: number };
 
 export function TestPage() {
-  const { id } = useParams();
-  const nav = useNavigate();
-  const user = getSavedUser();
-  const deckId = Number(id);
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const { deck, cards: loaded, sourceLang, backTo, ids, error } = useStudyPack();
   const [cards, setCards] = useState<Card[]>([]);
   const [questions, setQuestions] = useState<TestQuestion[]>([]);
   const [i, setI] = useState(0);
@@ -29,16 +26,9 @@ export function TestPage() {
   const [matchWrong, setMatchWrong] = useState(0);
 
   useEffect(() => {
-    if (!user) {
-      nav("/");
-      return;
-    }
-    api.deck(deckId, user.id).then((data) => {
-      setDeck(data.deck);
-      setCards(data.cards);
-      start(data.cards);
-    });
-  }, [deckId, nav, user?.id]);
+    setCards(loaded);
+    start(loaded);
+  }, [loaded]);
 
   function start(list: Card[]) {
     const qs = buildTest(list);
@@ -144,18 +134,18 @@ export function TestPage() {
     }
   }
 
-  if (!deck) return <div className="shell">Loading…</div>;
+  if (!deck) return <div className="shell">{error || "Loading…"}</div>;
 
   return (
     <div className="shell study-shell">
       <header className="topbar">
         <div>
-          <Link className="meta" to={`/decks/${deck.id}`}>
+          <Link className="meta" to={backTo}>
             ← {deck.name}
           </Link>
           <h1 style={{ marginTop: 6 }}>Test</h1>
         </div>
-        <ModeNav deckId={deck.id} active="test" />
+        <ModeNav deckId={deck.id} active="test" ids={ids} />
       </header>
 
       {cards.length === 0 && <p>Add cards before taking a test.</p>}
@@ -189,9 +179,15 @@ export function TestPage() {
               {locked && !picked && (
                 <p className="error">
                   Answer: <strong>{q.card.word}</strong>
+                  <SpeakButton text={q.card.word} lang={q.card.source_lang || sourceLang} />
                 </p>
               )}
-              {locked && picked === true && <p className="ok">Correct</p>}
+              {locked && picked === true && (
+                <p className="ok">
+                  Correct
+                  <SpeakButton text={q.card.word} lang={q.card.source_lang || sourceLang} />
+                </p>
+              )}
               <div className="actions">
                 <button className="primary" disabled={!locked && !typed.trim()}>
                   {locked ? "Continue" : "Answer"}
@@ -315,8 +311,8 @@ export function TestPage() {
             <button className="primary" onClick={() => start(cards)}>
               Take test again
             </button>
-            <Link className="ghost" to={`/decks/${deck.id}`}>
-              Back to set
+            <Link className="ghost" to={backTo}>
+              Back
             </Link>
           </div>
         </div>

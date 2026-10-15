@@ -2,24 +2,32 @@ import {
   addShare,
   canAccessDeck,
   createDeck,
+  createRule,
   createUser,
   deleteCardById,
   deleteCardsByIds,
   deleteDeck,
+  deleteRule,
   findDeckById,
+  findRuleById,
   findUserById,
   findUserByUsername,
+  incrementCheckReview,
   incrementReview,
   insertCard,
+  insertRuleChecks,
   listCardWords,
   listCards,
+  listRuleChecks,
   listShares,
+  listStudyCards,
   listUserDecks,
+  listUserRules,
   removeShare,
   updateDeck,
   type Card,
 } from "./db";
-import { extractWordsFromImage, generateCards } from "./ai";
+import { extractWordsFromImage, generateCards, generateRule } from "./ai";
 import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -120,13 +128,75 @@ Bun.serve({
         return json({ user, decks });
       }
 
+      if (method === "GET" && path === "/api/study") {
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (!actorId) return bad("userId required");
+        const ids = (url.searchParams.get("ids") || "")
+          .split(",")
+          .map(Number)
+          .filter((n) => Number.isFinite(n) && n > 0);
+        if (ids.length === 0) return bad("Select at least one set");
+        return json(await listStudyCards(actorId, ids));
+      }
+
+      if (method === "GET" && path.startsWith("/api/users/") && path.endsWith("/rules")) {
+        const userId = Number(path.split("/")[3]);
+        const user = await findUserById(userId);
+        if (!user) return json({ error: "User not found" }, 404);
+        return json({ rules: await listUserRules(userId) });
+      }
+
+      if (method === "POST" && path === "/api/rules") {
+        const parsed = await readRuleRequest(req);
+        if (!parsed.userId) return bad("userId required");
+        const user = await findUserById(parsed.userId);
+        if (!user) return json({ error: "User not found" }, 404);
+        const generated = await generateRule({ prompt: parsed.prompt, imageDataUrl: parsed.imageDataUrl });
+        const rule = await createRule({
+          userId: parsed.userId,
+          title: parsed.title || generated.title,
+          markup: generated.markup,
+          prompt: parsed.prompt,
+        });
+        const ruleChecks = await insertRuleChecks(rule.id, generated.checks);
+        console.log("[quiz-words] rule", { ruleId: rule.id, checks: ruleChecks.length });
+        return json({ rule: { ...rule, check_count: ruleChecks.length }, checks: ruleChecks }, 201);
+      }
+
+      const ruleMatch = path.match(/^\/api\/rules\/(\d+)$/);
+      if (ruleMatch && method === "GET") {
+        const rule = await findRuleById(Number(ruleMatch[1]));
+        if (!rule) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && rule.user_id !== actorId) return json({ error: "You do not have access to this rule" }, 403);
+        const ruleChecks = await listRuleChecks(rule.id);
+        return json({ rule: { ...rule, check_count: ruleChecks.length }, checks: ruleChecks });
+      }
+
+      if (ruleMatch && method === "DELETE") {
+        const rule = await findRuleById(Number(ruleMatch[1]));
+        if (!rule) return notFound();
+        const actorId = Number(url.searchParams.get("userId") || 0);
+        if (actorId && rule.user_id !== actorId) return json({ error: "Only the owner can delete this rule" }, 403);
+        await deleteRule(rule.id);
+        return json({ ok: true });
+      }
+
+      const checkReviewMatch = path.match(/^\/api\/rule-checks\/(\d+)\/review$/);
+      if (checkReviewMatch && method === "POST") {
+        const body = await readJson<{ known?: boolean }>(req);
+        const check = await incrementCheckReview(Number(checkReviewMatch[1]), Boolean(body.known));
+        if (!check) return notFound();
+        return json(check);
+      }
+
       if (method === "POST" && path === "/api/import") {
         const parsed = await readImportRequest(req);
         if (!parsed.userId) return bad("userId required");
         const user = await findUserById(parsed.userId);
         if (!user) return json({ error: "User not found" }, 404);
         if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
-        const name = parsed.title || parsed.name || "Imported set";
+        const name = parsed.name || parsed.title || "Imported set";
         const deck = await createDeck({
           userId: parsed.userId,
           name,
@@ -438,7 +508,6 @@ async function insertImported(deckId: number, incoming: ImportedCard[], title = 
   const taken = new Set(existing.map((word) => word.trim().toLowerCase()));
   let added = 0;
   let skipped = 0;
-  const note = title || "";
   for (const card of incoming) {
     const key = card.word.trim().toLowerCase();
     if (taken.has(key)) {
@@ -450,7 +519,7 @@ async function insertImported(deckId: number, incoming: ImportedCard[], title = 
       translation: card.translation,
       sentence: card.sentence || "",
       sentenceTranslation: card.sentenceTranslation || "",
-      notes: card.notes || note,
+        notes: card.notes || "",
     });
     if (ok) {
       taken.add(key);
@@ -515,5 +584,33 @@ async function readImportRequest(req: Request) {
   }
 
   return { userId, name, sourceLang, targetLang, title, cards };
+}
+
+async function readRuleRequest(req: Request) {
+  const ctype = req.headers.get("content-type") || "";
+  if (ctype.includes("multipart/form-data")) {
+    const form = await req.formData();
+    const file = form.get("image");
+    let imageDataUrl = "";
+    if (file instanceof File && file.size > 0) {
+      if (file.size > 8 * 1024 * 1024) throw new Error("Image must be under 8MB");
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const mime = file.type || "image/jpeg";
+      imageDataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
+    }
+    return {
+      userId: Number(form.get("userId") || 0),
+      title: String(form.get("title") || "").trim(),
+      prompt: String(form.get("prompt") || "").trim(),
+      imageDataUrl,
+    };
+  }
+  const body = await readJson<{ userId?: number; title?: string; prompt?: string; image?: string }>(req);
+  return {
+    userId: Number(body.userId || 0),
+    title: body.title?.trim() || "",
+    prompt: body.prompt?.trim() || "",
+    imageDataUrl: body.image?.trim() || "",
+  };
 }
 

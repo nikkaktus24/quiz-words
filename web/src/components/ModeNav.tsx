@@ -8,14 +8,16 @@ const modes: { id: StudyMode; label: string; hint: string }[] = [
   { id: "test", label: "Test", hint: "Check" },
 ];
 
-export function ModeNav({ deckId, active }: { deckId: number; active: StudyMode }) {
+export function ModeNav({ deckId, active, ids }: { deckId: number; active: StudyMode; ids?: number[] }) {
+  const href = (mode: StudyMode) =>
+    ids?.length ? `/review/${mode}?ids=${ids.join(",")}` : `/decks/${deckId}/${mode}`;
   return (
     <nav className="mode-nav">
       {modes.map((mode) => (
         <Link
           key={mode.id}
           className={`mode-link ${active === mode.id ? "on" : ""}`}
-          to={`/decks/${deckId}/${mode.id}`}
+          to={href(mode.id)}
         >
           <span>{mode.label}</span>
           <small>{mode.hint}</small>

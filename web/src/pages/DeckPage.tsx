@@ -4,6 +4,7 @@ import { api } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
 import { ModeTiles } from "../components/ModeNav";
 import { RenameName } from "../components/RenameName";
+import { SpeakButton } from "../components/SpeakButton";
 import { getSavedUser } from "../session";
 import { langLabel, type Card, type Deck } from "../types";
 
@@ -26,6 +27,8 @@ export function DeckPage() {
   const [shareNames, setShareNames] = useState("");
   const [shareBusy, setShareBusy] = useState(false);
   const [sharedWith, setSharedWith] = useState<{ id: number; username: string }[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -38,6 +41,7 @@ export function DeckPage() {
         setDeck(data.deck);
         setCards(data.cards);
         setSharedWith(data.deck.shared_with || []);
+        setAddOpen(data.cards.length === 0);
       })
       .catch((err) => {
         console.error("[quiz-words] load deck failed", err);
@@ -232,6 +236,16 @@ export function DeckPage() {
         </div>
         <div className="row">
           {owner && (
+            <button className={`ghost ${addOpen ? "on" : ""}`} onClick={() => setAddOpen((v) => !v)}>
+              Add cards
+            </button>
+          )}
+          {owner && (
+            <button className={`ghost ${shareOpen ? "on" : ""}`} onClick={() => setShareOpen((v) => !v)}>
+              Share
+            </button>
+          )}
+          {owner && (
             <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
               {dedupeBusy ? "Checking…" : "Remove duplicates"}
             </button>
@@ -250,7 +264,7 @@ export function DeckPage() {
 
       <ModeTiles deckId={deck.id} count={cards.length} />
 
-      {owner && (
+      {owner && shareOpen && (
         <section className="panel" style={{ marginBottom: 16 }}>
           <h2>Share</h2>
           <p className="lede">Type usernames to share this set. They get Flashcards, Learn, and Test in their library.</p>
@@ -284,7 +298,7 @@ export function DeckPage() {
         </section>
       )}
 
-      {owner && (
+      {owner && addOpen && (
         <section className="panel">
           <div className="tabs">
             <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
@@ -362,7 +376,10 @@ export function DeckPage() {
         {cards.map((c) => (
           <article className="panel study-card" key={c.id}>
             <div>
-              <div className="word">{c.word}</div>
+              <div className="word-row">
+                <div className="word">{c.word}</div>
+                <SpeakButton text={c.word} lang={deck.source_lang} />
+              </div>
               <div className="translation">{c.translation}</div>
               {c.sentence ? <div className="sentence">{c.sentence}</div> : null}
               {c.sentence_translation ? <div className="sentence">{c.sentence_translation}</div> : null}

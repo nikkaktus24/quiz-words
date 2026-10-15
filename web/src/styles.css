@@ -110,6 +110,23 @@ a {
   transform: translateY(-1px);
 }
 
+.ghost.on {
+  border-color: var(--accent);
+  background: #eef0ff;
+  color: var(--accent);
+}
+
+a.primary,
+a.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+a.primary {
+  color: #fff;
+}
+
 .primary,
 .pine,
 .danger {
@@ -660,6 +677,169 @@ label {
   color: var(--pine);
   font-weight: 600;
   margin: 10px 0 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.toolbar-review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.composer {
+  margin-bottom: 22px;
+}
+
+.row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.deck-card.picked {
+  border-color: #cfd4ff;
+  box-shadow: 0 0 0 3px rgba(66, 85, 255, 0.12);
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.icon-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.icon-btn:hover {
+  border-color: var(--accent);
+  background: #eef0ff;
+}
+
+.word-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.word-row.center {
+  justify-content: center;
+}
+
+.linkish {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.rule-panel {
+  padding: 24px;
+}
+
+.rule-markup {
+  line-height: 1.55;
+}
+
+.rule-markup h2,
+.rule-markup h3 {
+  margin: 16px 0 8px;
+}
+
+.rule-markup p,
+.rule-markup ul,
+.rule-markup ol {
+  margin: 0 0 10px;
+}
+
+.rule-markup .ex {
+  background: #eef0ff;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.rule-markup .ok {
+  color: var(--pine);
+  font-weight: 650;
+}
+
+.rule-markup .no {
+  color: var(--wrong);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+
+.check-preview {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.check-preview .meta {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 8px;
+}
+
+.rule-markup .rule-box,
+.rule-markup .pair {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+  background: #fbfbfe;
+}
+
+.rule-markup table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.rule-markup th,
+.rule-markup td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
 }
 
 .share-list {

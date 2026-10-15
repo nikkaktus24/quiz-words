@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ModeNav } from "../components/ModeNav";
+import { SpeakButton } from "../components/SpeakButton";
 import { shuffle } from "../lib/study";
-import { getSavedUser } from "../session";
-import type { Card, Deck } from "../types";
+import { useStudyPack } from "../lib/useStudyPack";
+import type { Card } from "../types";
 
 export function FlashcardsPage() {
-  const { id } = useParams();
-  const nav = useNavigate();
-  const user = getSavedUser();
-  const deckId = Number(id);
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const { deck, cards: loaded, sourceLang, backTo, ids, error } = useStudyPack();
   const [cards, setCards] = useState<Card[]>([]);
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -19,15 +16,12 @@ export function FlashcardsPage() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (!user) {
-      nav("/");
-      return;
-    }
-    api.deck(deckId, user.id).then((data) => {
-      setDeck(data.deck);
-      setCards(shuffle(data.cards));
-    });
-  }, [deckId, nav, user?.id]);
+    setCards(shuffle(loaded));
+    setI(0);
+    setKnown(0);
+    setDone(false);
+    setFlipped(false);
+  }, [loaded]);
 
   const card = cards[i];
   const pct = useMemo(() => (cards.length ? Math.round(((done ? cards.length : i) / cards.length) * 100) : 0), [i, cards.length, done]);
@@ -64,18 +58,18 @@ export function FlashcardsPage() {
     setFlipped(false);
   }
 
-  if (!deck) return <div className="shell">Loading…</div>;
+  if (!deck) return <div className="shell">{error || "Loading…"}</div>;
 
   return (
     <div className="shell study-shell">
       <header className="topbar">
         <div>
-          <Link className="meta" to={`/decks/${deck.id}`}>
+          <Link className="meta" to={backTo}>
             ← {deck.name}
           </Link>
           <h1 style={{ marginTop: 6 }}>Flashcards</h1>
         </div>
-        <ModeNav deckId={deck.id} active="cards" />
+        <ModeNav deckId={deck.id} active="cards" ids={ids} />
       </header>
 
       {cards.length === 0 && <p>Add cards before studying.</p>}
@@ -86,7 +80,7 @@ export function FlashcardsPage() {
             <div style={{ width: `${pct}%` }} />
           </div>
           <p className="meta" style={{ textAlign: "center" }}>
-            {i + 1} / {cards.length} · click or space to flip · 1 still learning · 2 know it
+            {i + 1} / {cards.length} · click or space to flip · press 1 still learning · 2 know it
           </p>
           <div className="stage">
             <button className={`flip ${flipped ? "show-back" : ""}`} onClick={() => setFlipped((f) => !f)}>
@@ -112,6 +106,7 @@ export function FlashcardsPage() {
             </button>
           </div>
           <div className="actions">
+            <SpeakButton text={card.word} lang={card.source_lang || sourceLang} />
             <button className="danger" onClick={() => void mark(false)}>
               Still learning
             </button>
@@ -132,8 +127,8 @@ export function FlashcardsPage() {
             <button className="primary" onClick={restart}>
               Shuffle again
             </button>
-            <Link className="ghost" to={`/decks/${deck.id}`}>
-              Back to set
+            <Link className="ghost" to={backTo}>
+              Back
             </Link>
           </div>
         </div>

@@ -1,21 +1,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ModeNav } from "../components/ModeNav";
+import { SpeakButton } from "../components/SpeakButton";
 import { answersMatch, blankSentence, mcqOptions, shuffle } from "../lib/study";
-import { getSavedUser } from "../session";
-import { langLabel, type Card, type Deck } from "../types";
+import { useStudyPack } from "../lib/useStudyPack";
+import { langLabel, type Card } from "../types";
 
 type Item = { card: Card; streak: number };
 type Kind = "mcq" | "write";
 type Prompt = { item: Item; kind: Kind; options: string[] };
 
 export function LearnPage() {
-  const { id } = useParams();
-  const nav = useNavigate();
-  const user = getSavedUser();
-  const deckId = Number(id);
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const { deck, cards: loaded, sourceLang, backTo, ids, error } = useStudyPack();
   const [allCards, setAllCards] = useState<Card[]>([]);
   const [queue, setQueue] = useState<Item[]>([]);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
@@ -26,20 +23,16 @@ export function LearnPage() {
   const grading = useRef(false);
 
   useEffect(() => {
-    if (!user) {
-      nav("/");
-      return;
-    }
-    api.deck(deckId, user.id).then((data) => {
-      setDeck(data.deck);
-      setAllCards(data.cards);
-      const items = shuffle(data.cards).map((card) => ({ card, streak: 0 }));
-      setQueue(items.slice(1));
-      setMastered(0);
-      setDone(data.cards.length === 0);
-      if (items[0]) setPrompt(makePrompt(items[0], data.cards));
-    });
-  }, [deckId, nav, user?.id]);
+    setAllCards(loaded);
+    const items = shuffle(loaded).map((card) => ({ card, streak: 0 }));
+    setQueue(items.slice(1));
+    setMastered(0);
+    setDone(loaded.length === 0);
+    setTyped("");
+    setResult(null);
+    if (items[0]) setPrompt(makePrompt(items[0], loaded));
+    else setPrompt(null);
+  }, [loaded]);
 
   const total = allCards.length;
   const pct = useMemo(() => (total ? Math.round((mastered / total) * 100) : 0), [mastered, total]);
@@ -98,7 +91,7 @@ export function LearnPage() {
     void grade(result === "correct");
   }
 
-  if (!deck) return <div className="shell">Loading…</div>;
+  if (!deck) return <div className="shell">{error || "Loading…"}</div>;
 
   const sourceName = langLabel(deck.source_lang);
   const promptLang = sourceName === "Detect" ? "term" : sourceName;
@@ -107,12 +100,12 @@ export function LearnPage() {
     <div className="shell study-shell">
       <header className="topbar">
         <div>
-          <Link className="meta" to={`/decks/${deck.id}`}>
+          <Link className="meta" to={backTo}>
             ← {deck.name}
           </Link>
           <h1 style={{ marginTop: 6 }}>Learn</h1>
         </div>
-        <ModeNav deckId={deck.id} active="learn" />
+        <ModeNav deckId={deck.id} active="learn" ids={ids} />
       </header>
 
       {total === 0 && <p>Add cards before studying.</p>}
@@ -150,6 +143,7 @@ export function LearnPage() {
               {result === "wrong" && (
                 <p className="error">
                   Correct answer: <strong>{prompt.item.card.word}</strong>
+                  <SpeakButton text={prompt.item.card.word} lang={prompt.item.card.source_lang || sourceLang} />
                 </p>
               )}
               {result && (
@@ -187,10 +181,16 @@ export function LearnPage() {
                 disabled={!!result}
                 placeholder="Type the term"
               />
-              {result === "correct" && <p className="ok">Correct</p>}
+              {result === "correct" && (
+                <p className="ok">
+                  Correct
+                  <SpeakButton text={prompt.item.card.word} lang={prompt.item.card.source_lang || sourceLang} />
+                </p>
+              )}
               {result === "wrong" && (
                 <p className="error">
                   The term is <strong>{prompt.item.card.word}</strong>
+                  <SpeakButton text={prompt.item.card.word} lang={prompt.item.card.source_lang || sourceLang} />
                 </p>
               )}
               <div className="actions">
@@ -232,8 +232,8 @@ export function LearnPage() {
             >
               Learn again
             </button>
-            <Link className="ghost" to={`/decks/${deck.id}`}>
-              Back to set
+            <Link className="ghost" to={backTo}>
+              Back
             </Link>
           </div>
         </div>
