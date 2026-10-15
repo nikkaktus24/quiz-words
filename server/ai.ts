@@ -6,10 +6,70 @@ import { join } from "node:path";
 const MODEL = "openai/gpt-5-nano";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const TTS_URL = "https://openrouter.ai/api/v1/audio/speech";
-const TTS_MODEL = process.env.TTS_MODEL?.trim() || "x-ai/grok-voice-tts-1.0";
-const TTS_VOICE = process.env.TTS_VOICE?.trim() || "ara";
+const TTS_MODEL = process.env.TTS_MODEL?.trim() || "";
+const TTS_VOICE = process.env.TTS_VOICE?.trim() || "";
 const TTS_CACHE = join(tmpdir(), "quiz-words-tts");
 const ttsMem = new Map<string, Uint8Array>();
+
+type TtsTarget = { model: string; voice: string };
+
+const MS = "microsoft/mai-voice-2.1-flash";
+const MS_VOICES: Record<string, string> = {
+  en: "en-US-Harper:MAI-Voice-2.1-Flash",
+  es: "es-ES-Marta:MAI-Voice-2.1-Flash",
+  fr: "fr-FR-Soleil:MAI-Voice-2.1-Flash",
+  de: "de-DE-Mia:MAI-Voice-2.1-Flash",
+  it: "it-IT-Rosa:MAI-Voice-2.1-Flash",
+  pt: "pt-PT-Harper:MAI-Voice-2.1-Flash",
+  pl: "pl-PL-Harper:MAI-Voice-2.1-Flash",
+  ru: "ru-RU-Masha:MAI-Voice-2.1-Flash",
+  uk: "ru-RU-Masha:MAI-Voice-2.1-Flash",
+  zh: "zh-CN-Mei:MAI-Voice-2.1-Flash",
+  ko: "ko-KR-Haena:MAI-Voice-2.1-Flash",
+};
+
+const KOKORO = "hexgrad/kokoro-82m";
+const KOKORO_VOICES: Record<string, string> = {
+  en: "af_heart",
+  es: "ef_dora",
+  fr: "ff_siwis",
+  it: "if_sara",
+  pt: "pf_dora",
+  ja: "jf_alpha",
+  zh: "zf_xiaoxiao",
+};
+
+function guessTtsLang(text: string, hinted: string) {
+  if (hinted && hinted !== "auto") return hinted;
+  if (/[áéíóúñ¿¡]/i.test(text) || /\b(el|la|los|las|hola|gracias|qué|cómo)\b/i.test(text)) return "es";
+  if (/[àâçéèêëîïôûùüÿœ]/i.test(text) || /\b(bonjour|merci|être|vous)\b/i.test(text)) return "fr";
+  if (/[äöüß]/i.test(text) || /\b(der|die|das|und|nicht)\b/i.test(text)) return "de";
+  if (/[ґєії]/i.test(text)) return "uk";
+  if (/[\u0400-\u04FF]/.test(text)) return "ru";
+  if (/[\u3040-\u30ff]/.test(text)) return "ja";
+  if (/[\u4e00-\u9fff]/.test(text)) return "zh";
+  if (/[\uac00-\ud7af]/.test(text)) return "ko";
+  if (/\b(ciao|grazie|sono)\b/i.test(text)) return "it";
+  if (/\b(olá|obrigado|não)\b/i.test(text)) return "pt";
+  return "en";
+}
+
+function ttsTargets(lang: string): TtsTarget[] {
+  const code = lang === "auto" ? "en" : lang;
+  const list: TtsTarget[] = [
+    { model: "x-ai/grok-voice-tts-1.0", voice: "ara" },
+    { model: MS, voice: MS_VOICES[code] || MS_VOICES.en },
+    { model: KOKORO, voice: KOKORO_VOICES[code] || KOKORO_VOICES.en },
+  ];
+  if (TTS_MODEL) list.unshift({ model: TTS_MODEL, voice: TTS_VOICE || "ara" });
+  const seen = new Set<string>();
+  return list.filter((t) => {
+    const key = `${t.model}|${t.voice}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 type ChatContent =
   | string
@@ -276,13 +336,74 @@ export function sanitizeMarkup(input: string) {
 }
 
 function ttsKey(text: string, lang: string) {
-  return createHash("sha256").update(`${TTS_MODEL}|${TTS_VOICE}|${lang}|${text}`).digest("hex");
+  return createHash("sha256").update(`v2|${lang}|${text}`).digest("hex");
+}
+
+function rememberAudio(key: string, bytes: Uint8Array) {
+  ttsMem.set(key, bytes);
+  if (ttsMem.size > 400) {
+    const first = ttsMem.keys().next().value;
+    if (first) ttsMem.delete(first);
+  }
+  mkdir(TTS_CACHE, { recursive: true })
+    .then(() => writeFile(join(TTS_CACHE, `${key}.mp3`), bytes))
+    .catch(() => undefined);
+}
+
+async function ttsOnce(target: TtsTarget, input: string) {
+  const started = Date.now();
+  try {
+    const res = await fetch(TTS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:5173",
+        "X-Title": "Quiz Words",
+      },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model: target.model,
+        input,
+        voice: target.voice,
+        response_format: "mp3",
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[quiz-words] TTS error", {
+        model: target.model,
+        status: res.status,
+        durationMs: Date.now() - started,
+        body: errText.slice(0, 400),
+      });
+      return { ok: false as const, status: res.status, body: errText };
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength < 64) {
+      console.error("[quiz-words] TTS empty", { model: target.model, durationMs: Date.now() - started });
+      return { ok: false as const, status: 502, body: "empty audio" };
+    }
+    console.log("[quiz-words] TTS ok", {
+      model: target.model,
+      durationMs: Date.now() - started,
+      bytes: bytes.byteLength,
+    });
+    return { ok: true as const, bytes };
+  } catch (err) {
+    console.error("[quiz-words] TTS request failed", {
+      model: target.model,
+      durationMs: Date.now() - started,
+      err: err instanceof Error ? err.message : err,
+    });
+    return { ok: false as const, status: 502, body: err instanceof Error ? err.message : "request failed" };
+  }
 }
 
 export async function synthesizeSpeech(text: string, lang = "auto") {
   const input = text.trim().slice(0, 400);
   if (!input) throw new Error("Nothing to speak");
-  const langKey = (lang || "auto").trim() || "auto";
+  const langKey = guessTtsLang(input, (lang || "auto").trim() || "auto");
   const key = ttsKey(input, langKey);
   const cached = ttsMem.get(key);
   if (cached) return cached;
@@ -296,43 +417,19 @@ export async function synthesizeSpeech(text: string, lang = "auto") {
     // generate
   }
 
-  console.log("[quiz-words] TTS request", { model: TTS_MODEL, chars: input.length, lang: langKey });
-  const started = Date.now();
-  const res = await fetch(TTS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey()}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:5173",
-      "X-Title": "Quiz Words",
-    },
-    signal: AbortSignal.timeout(45_000),
-    body: JSON.stringify({
-      model: TTS_MODEL,
-      input,
-      voice: TTS_VOICE,
-      response_format: "mp3",
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error("[quiz-words] TTS error", {
-      status: res.status,
-      durationMs: Date.now() - started,
-      body: errText.slice(0, 800),
-    });
-    throw new Error(`TTS error ${res.status}: ${errText.slice(0, 400)}`);
+  const targets = ttsTargets(langKey);
+  let last = "TTS failed";
+  for (const target of targets) {
+    console.log("[quiz-words] TTS request", { model: target.model, chars: input.length, lang: langKey });
+    let result = await ttsOnce(target, input);
+    if (!result.ok && result.status >= 500 && target.model.startsWith("x-ai/")) {
+      result = await ttsOnce(target, input);
+    }
+    if (result.ok) {
+      rememberAudio(key, result.bytes);
+      return result.bytes;
+    }
+    last = `TTS error ${result.status}: ${result.body.slice(0, 200)}`;
   }
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.byteLength < 64) throw new Error("TTS returned empty audio");
-  console.log("[quiz-words] TTS ok", { durationMs: Date.now() - started, bytes: bytes.byteLength });
-  ttsMem.set(key, bytes);
-  if (ttsMem.size > 400) {
-    const first = ttsMem.keys().next().value;
-    if (first) ttsMem.delete(first);
-  }
-  mkdir(TTS_CACHE, { recursive: true })
-    .then(() => writeFile(file, bytes))
-    .catch(() => undefined);
-  return bytes;
+  throw new Error(last);
 }
