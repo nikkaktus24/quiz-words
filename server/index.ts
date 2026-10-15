@@ -27,7 +27,7 @@ import {
   updateDeck,
   type Card,
 } from "./db";
-import { extractWordsFromImage, generateCards, generateRule } from "./ai";
+import { extractWordsFromImage, generateCards, generateRule, synthesizeSpeech } from "./ai";
 import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -107,6 +107,21 @@ Bun.serve({
     }
 
     try {
+      if (method === "POST" && path === "/api/speak") {
+        const body = await readJson<{ text?: string; lang?: string }>(req);
+        const text = body.text?.trim() || "";
+        if (!text) return bad("text required");
+        const audio = await synthesizeSpeech(text, body.lang);
+        return new Response(audio, {
+          status: 200,
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Cache-Control": "public, max-age=86400",
+            ...corsHeaders(req),
+          },
+        });
+      }
+
       if (method === "POST" && path === "/api/profile") {
         const body = await readJson<{ username?: string }>(req);
         const username = body.username?.trim();

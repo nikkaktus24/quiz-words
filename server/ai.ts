@@ -1,5 +1,15 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 const MODEL = "openai/gpt-5-nano";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const TTS_URL = "https://openrouter.ai/api/v1/audio/speech";
+const TTS_MODEL = process.env.TTS_MODEL?.trim() || "x-ai/grok-voice-tts-1.0";
+const TTS_VOICE = process.env.TTS_VOICE?.trim() || "ara";
+const TTS_CACHE = join(tmpdir(), "quiz-words-tts");
+const ttsMem = new Map<string, Uint8Array>();
 
 type ChatContent =
   | string
@@ -258,4 +268,66 @@ export function sanitizeMarkup(input: string) {
       .join(" ");
     return safe ? `<${name} class="${safe}">` : `<${name}>`;
   });
+}
+
+function ttsKey(text: string, lang: string) {
+  return createHash("sha256").update(`${TTS_MODEL}|${TTS_VOICE}|${lang}|${text}`).digest("hex");
+}
+
+export async function synthesizeSpeech(text: string, lang = "auto") {
+  const input = text.trim().slice(0, 400);
+  if (!input) throw new Error("Nothing to speak");
+  const langKey = (lang || "auto").trim() || "auto";
+  const key = ttsKey(input, langKey);
+  const cached = ttsMem.get(key);
+  if (cached) return cached;
+
+  const file = join(TTS_CACHE, `${key}.mp3`);
+  try {
+    const fromDisk = await readFile(file);
+    ttsMem.set(key, fromDisk);
+    return fromDisk;
+  } catch {
+    // generate
+  }
+
+  console.log("[quiz-words] TTS request", { model: TTS_MODEL, chars: input.length, lang: langKey });
+  const started = Date.now();
+  const res = await fetch(TTS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "http://localhost:5173",
+      "X-Title": "Quiz Words",
+    },
+    signal: AbortSignal.timeout(45_000),
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      input,
+      voice: TTS_VOICE,
+      response_format: "mp3",
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("[quiz-words] TTS error", {
+      status: res.status,
+      durationMs: Date.now() - started,
+      body: errText.slice(0, 800),
+    });
+    throw new Error(`TTS error ${res.status}: ${errText.slice(0, 400)}`);
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength < 64) throw new Error("TTS returned empty audio");
+  console.log("[quiz-words] TTS ok", { durationMs: Date.now() - started, bytes: bytes.byteLength });
+  ttsMem.set(key, bytes);
+  if (ttsMem.size > 400) {
+    const first = ttsMem.keys().next().value;
+    if (first) ttsMem.delete(first);
+  }
+  mkdir(TTS_CACHE, { recursive: true })
+    .then(() => writeFile(file, bytes))
+    .catch(() => undefined);
+  return bytes;
 }

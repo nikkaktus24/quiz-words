@@ -22,7 +22,9 @@ export function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [staged, setStaged] = useState<{ payload: ImportSubmit; label: string } | null>(null);
+  const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
   const [shareDeckId, setShareDeckId] = useState<number | null>(null);
   const [shareNames, setShareNames] = useState("");
   const [rulePrompt, setRulePrompt] = useState("");
@@ -144,6 +146,11 @@ export function Home() {
     setSelected((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
   }
 
+  function stopPick() {
+    setPicking(false);
+    setSelected([]);
+  }
+
   async function removeDeck(deck: Deck) {
     if (!confirm(`Delete “${deck.name}”?`)) return;
     await api.deleteDeck(deck.id, me.id);
@@ -197,18 +204,36 @@ export function Home() {
         <button className={`ghost ${composer === "rule" ? "on" : ""}`} onClick={() => setComposer(composer === "rule" ? "" : "rule")}>
           New rule
         </button>
-        {selected.length > 0 && (
+        {tab === "sets" && decks.length > 0 && (
+          <button
+            className={`ghost ${picking ? "on" : ""}`}
+            onClick={() => (picking ? stopPick() : setPicking(true))}
+          >
+            {picking ? "Done" : "Select"}
+          </button>
+        )}
+        {picking && (
           <div className="toolbar-review">
-            <span className="meta">{selected.length} selected</span>
-            <Link className="primary" to={reviewHref("cards")}>
-              Flashcards
-            </Link>
-            <Link className="ghost" to={reviewHref("learn")}>
-              Learn
-            </Link>
-            <Link className="ghost" to={reviewHref("test")}>
-              Test
-            </Link>
+            <button
+              className="ghost"
+              onClick={() => setSelected(selected.length === decks.length ? [] : decks.map((d) => d.id))}
+            >
+              {selected.length === decks.length ? "Clear" : "Select all"}
+            </button>
+            {selected.length > 0 && (
+              <>
+                <span className="meta">{selected.length} selected</span>
+                <Link className="primary" to={reviewHref("cards")}>
+                  Flashcards
+                </Link>
+                <Link className="ghost" to={reviewHref("learn")}>
+                  Learn
+                </Link>
+                <Link className="ghost" to={reviewHref("test")}>
+                  Test
+                </Link>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -342,7 +367,13 @@ export function Home() {
         <button className={`tab ${tab === "sets" ? "on" : ""}`} onClick={() => setTab("sets")}>
           Sets ({decks.length})
         </button>
-        <button className={`tab ${tab === "rules" ? "on" : ""}`} onClick={() => setTab("rules")}>
+        <button
+          className={`tab ${tab === "rules" ? "on" : ""}`}
+          onClick={() => {
+            setTab("rules");
+            stopPick();
+          }}
+        >
           Rules ({rules.length})
         </button>
       </div>
@@ -351,73 +382,92 @@ export function Home() {
         <>
           <div className="terms-heading row-head">
             <h2>Library</h2>
-            {decks.length > 0 && (
-              <button
-                className="ghost"
-                onClick={() => setSelected(selected.length === decks.length ? [] : decks.map((d) => d.id))}
-              >
-                {selected.length === decks.length ? "Clear" : "Select all"}
-              </button>
-            )}
           </div>
           <div className="grid">
             {decks.length === 0 && <p className="meta">No sets yet. Create one when you need it.</p>}
-            {decks.map((d) => (
-              <article key={d.id} className={`deck-card ${selectedSet.has(d.id) ? "picked" : ""}`}>
-                <label className="pick">
-                  <input type="checkbox" checked={selectedSet.has(d.id)} onChange={() => toggle(d.id)} />
-                  Review
-                </label>
-                {d.is_owner !== false && !d.shared ? (
-                  <RenameName
-                    name={d.name}
-                    onSave={async (next) => {
-                      const updated = await api.updateDeck(d.id, { userId: me.id, name: next });
-                      setDecks((list) => list.map((item) => (item.id === d.id ? { ...item, name: updated.name } : item)));
-                    }}
-                  />
-                ) : (
-                  <h3>{d.name}</h3>
-                )}
-                <Link className="deck-card-body" to={`/decks/${d.id}`}>
-                  <p className="meta">
-                    {langLabel(d.source_lang)} → {langLabel(d.target_lang)} · {d.card_count ?? 0} term
-                    {(d.card_count ?? 0) === 1 ? "" : "s"}
-                    {d.shared ? ` · from ${d.owner_username}` : ""}
-                  </p>
-                </Link>
-                <div className="card-actions">
-                  {d.is_owner !== false && !d.shared && (
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        setShareDeckId(shareDeckId === d.id ? null : d.id);
-                        setShareNames("");
+            {decks.map((d) => {
+              const owner = d.is_owner !== false && !d.shared;
+              const meta = (
+                <p className="meta">
+                  {langLabel(d.source_lang)} → {langLabel(d.target_lang)} · {d.card_count ?? 0} term
+                  {(d.card_count ?? 0) === 1 ? "" : "s"}
+                  {d.shared ? ` · from ${d.owner_username}` : ""}
+                </p>
+              );
+              return (
+                <article
+                  key={d.id}
+                  className={`deck-card ${selectedSet.has(d.id) ? "picked" : ""} ${picking ? "picking" : ""}`}
+                >
+                  {renamingId === d.id ? (
+                    <RenameName
+                      autoEdit
+                      name={d.name}
+                      onSave={async (next) => {
+                        const updated = await api.updateDeck(d.id, { userId: me.id, name: next });
+                        setDecks((list) => list.map((item) => (item.id === d.id ? { ...item, name: updated.name } : item)));
                       }}
-                    >
-                      Share
-                    </button>
-                  )}
-                  {d.is_owner !== false && !d.shared && (
-                    <button type="button" className="danger" onClick={() => void removeDeck(d)}>
-                      Delete
-                    </button>
-                  )}
-                </div>
-                {shareDeckId === d.id && (
-                  <form className="row" onSubmit={shareDeck}>
-                    <input
-                      className="field grow"
-                      value={shareNames}
-                      onChange={(e) => setShareNames(e.target.value)}
-                      placeholder="alex, maria"
+                      onClose={() => setRenamingId(null)}
                     />
-                    <button className="primary">Share</button>
-                  </form>
-                )}
-              </article>
-            ))}
+                  ) : picking ? (
+                    <button type="button" className="deck-card-hit" onClick={() => toggle(d.id)}>
+                      <span className={`pick-mark ${selectedSet.has(d.id) ? "on" : ""}`} aria-hidden />
+                      <h3>{d.name}</h3>
+                      {meta}
+                    </button>
+                  ) : (
+                    <Link className="deck-card-hit" to={`/decks/${d.id}`}>
+                      <h3>{d.name}</h3>
+                      {meta}
+                    </Link>
+                  )}
+                  {!picking && renamingId !== d.id && (
+                    <div className="card-actions">
+                      {owner && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            setRenamingId(d.id);
+                            setShareDeckId(null);
+                          }}
+                        >
+                          Rename
+                        </button>
+                      )}
+                      {owner && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            setShareDeckId(shareDeckId === d.id ? null : d.id);
+                            setShareNames("");
+                          }}
+                        >
+                          Share
+                        </button>
+                      )}
+                      {owner && (
+                        <button type="button" className="danger" onClick={() => void removeDeck(d)}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {shareDeckId === d.id && !picking && (
+                    <form className="row deck-card-extra" onSubmit={shareDeck}>
+                      <input
+                        className="field grow"
+                        value={shareNames}
+                        onChange={(e) => setShareNames(e.target.value)}
+                        placeholder="alex, maria"
+                      />
+                      <button className="primary">Share</button>
+                    </form>
+                  )}
+                </article>
+              );
+            })}
           </div>
         </>
       )}
@@ -427,8 +477,8 @@ export function Home() {
           {rules.length === 0 && <p className="meta">No rules yet. Generate one from a prompt or screenshot.</p>}
           {rules.map((rule) => (
             <article key={rule.id} className="deck-card">
-              <h3>{rule.title}</h3>
-              <Link className="deck-card-body" to={`/rules/${rule.id}`}>
+              <Link className="deck-card-hit" to={`/rules/${rule.id}`}>
+                <h3>{rule.title}</h3>
                 <p className="meta">{rule.check_count ?? 0} checks</p>
               </Link>
               <div className="card-actions">

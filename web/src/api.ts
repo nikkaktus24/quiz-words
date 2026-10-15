@@ -181,6 +181,25 @@ export const api = {
       body: JSON.stringify({ known }),
     });
   },
+  async speak(text: string, lang?: string) {
+    const res = await fetch(apiUrl("/api/speak"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      let message = `Could not speak (${res.status})`;
+      try {
+        const data = (await res.json()) as { error?: string };
+        if (data.error) message = data.error;
+      } catch {
+        // not json
+      }
+      throw new Error(message);
+    }
+    return res.blob();
+  },
   importIntoDeck(deckId: number, body: ImportBody) {
     const q = body.userId ? `?userId=${body.userId}` : "";
     return request<ImportResult>(`/api/decks/${deckId}/import${q}`, {

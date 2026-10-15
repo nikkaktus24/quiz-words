@@ -4,12 +4,16 @@ export function RenameName({
   name,
   onSave,
   as: Tag = "h3",
+  autoEdit = false,
+  onClose,
 }: {
   name: string;
   onSave: (next: string) => Promise<void>;
   as?: "h1" | "h3";
+  autoEdit?: boolean;
+  onClose?: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(autoEdit);
   const [value, setValue] = useState(name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -22,6 +26,7 @@ export function RenameName({
     setEditing(false);
     setValue(name);
     setError("");
+    onClose?.();
   }
 
   async function submit(e: FormEvent) {
@@ -41,6 +46,7 @@ export function RenameName({
     try {
       await onSave(next);
       setEditing(false);
+      onClose?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not rename");
     } finally {
