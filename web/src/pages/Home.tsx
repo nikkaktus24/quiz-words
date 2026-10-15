@@ -32,6 +32,9 @@ export function Home() {
   const [ruleImage, setRuleImage] = useState<File | null>(null);
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleError, setRuleError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<"all" | "mine" | "shared">("all");
 
   useEffect(() => {
     if (!user) {
@@ -41,11 +44,12 @@ export function Home() {
     api
       .userDecks(user.id)
       .then((data) => setDecks(data.decks))
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
     api
       .userRules(user.id)
       .then((data) => setRules(data.rules))
-      .catch(() => undefined);
+      .catch((err) => setRuleError(err.message));
   }, [nav, user?.id]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -153,15 +157,19 @@ export function Home() {
 
   async function removeDeck(deck: Deck) {
     if (!confirm(`Delete “${deck.name}”?`)) return;
-    await api.deleteDeck(deck.id, me.id);
-    setDecks((list) => list.filter((d) => d.id !== deck.id));
-    setSelected((list) => list.filter((id) => id !== deck.id));
+    try {
+      await api.deleteDeck(deck.id, me.id);
+      setDecks((list) => list.filter((d) => d.id !== deck.id));
+      setSelected((list) => list.filter((id) => id !== deck.id));
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not delete set"); }
   }
 
   async function removeRule(rule: Rule) {
     if (!confirm(`Delete “${rule.title}”?`)) return;
-    await api.deleteRule(rule.id, me.id);
-    setRules((list) => list.filter((r) => r.id !== rule.id));
+    try {
+      await api.deleteRule(rule.id, me.id);
+      setRules((list) => list.filter((r) => r.id !== rule.id));
+    } catch (err) { setRuleError(err instanceof Error ? err.message : "Could not delete rule"); }
   }
 
   async function shareDeck(e: FormEvent) {
@@ -169,19 +177,25 @@ export function Home() {
     if (!shareDeckId) return;
     const names = shareNames.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean);
     if (!names.length) return;
-    await api.share(shareDeckId, me.id, names);
-    setShareDeckId(null);
-    setShareNames("");
+    try {
+      await api.share(shareDeckId, me.id, names);
+      setShareDeckId(null);
+      setShareNames("");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not share set"); }
   }
 
   const reviewHref = (mode: string) => `/review/${mode}?ids=${selected.join(",")}`;
+  const visibleDecks = decks.filter((deck) => deck.name.toLowerCase().includes(query.trim().toLowerCase()) && (scope === "all" || (scope === "shared" ? deck.shared : !deck.shared)));
+  const visibleRules = rules.filter((rule) => rule.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const wordCount = decks.reduce((total, deck) => total + (deck.card_count || 0), 0);
 
   return (
     <div className="shell">
       <header className="topbar">
         <div className="brand">
+          <span className="brand-mark" aria-hidden>✳</span>
           <strong>Lumen</strong>
-          <span>your library</span>
+          <span className="brand-caption">A little every day.</span>
         </div>
         <div className="user-chip">
           {user.username}
@@ -197,12 +211,17 @@ export function Home() {
         </div>
       </header>
 
+      <section className="library-hero">
+        <div><div className="eyebrow">Your space to learn</div><h1>Your next word awaits.</h1><p>Collect the words you find. Make them the words you know.</p></div>
+        <div className="library-stats"><div><strong>{decks.length}</strong><span>study set{decks.length === 1 ? "" : "s"}</span></div><div><strong>{wordCount}</strong><span>word{wordCount === 1 ? "" : "s"} collected</span></div></div>
+      </section>
+
       <div className="toolbar">
-        <button className={`ghost ${composer === "set" ? "on" : ""}`} onClick={() => setComposer(composer === "set" ? "" : "set")}>
-          New set
+        <button className="primary" aria-expanded={composer === "set"} onClick={() => setComposer(composer === "set" ? "" : "set")}>
+          {composer === "set" ? "Close" : "+ Create set"}
         </button>
-        <button className={`ghost ${composer === "rule" ? "on" : ""}`} onClick={() => setComposer(composer === "rule" ? "" : "rule")}>
-          New rule
+        <button className={`ghost ${composer === "rule" ? "on" : ""}`} aria-expanded={composer === "rule"} onClick={() => setComposer(composer === "rule" ? "" : "rule")}>
+          + New rule
         </button>
         {tab === "sets" && decks.length > 0 && (
           <button
@@ -241,11 +260,11 @@ export function Home() {
       {composer === "set" && (
         <section className="panel composer">
           <h2>New set</h2>
-          <p className="lede">Name it, optionally attach a file or link, share, then create. Languages are remembered.</p>
+          <p className="lede">Give your words a home. After creating your set, type words or add photos and screenshots.</p>
           <div className="stack-form">
             <div>
-              <label>Name</label>
-              <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Café Spanish" />
+              <label htmlFor="set-name">Set name</label>
+              <input id="set-name" className="field" disabled={busy} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Everyday French" />
             </div>
             <div>
               <label>Share with usernames (optional)</label>
@@ -298,7 +317,6 @@ export function Home() {
               {busy ? "Creating…" : staged ? "Create from file" : "Create"}
             </button>
           </div>
-          {error && <p className="error">{error}</p>}
         </section>
       )}
 
@@ -359,16 +377,19 @@ export function Home() {
               {ruleBusy ? "Generating…" : "Generate rule"}
             </button>
           </form>
-          {ruleError && <p className="error">{ruleError}</p>}
         </section>
       )}
 
-      <div className="tabs" style={{ marginTop: 8 }}>
-        <button className={`tab ${tab === "sets" ? "on" : ""}`} onClick={() => setTab("sets")}>
+      {error && <p className="error" role="alert">{error}</p>}
+      {ruleError && <p className="error" role="alert">{ruleError}</p>}
+      <div className="library-heading">
+      <div className="tabs" aria-label="Library categories">
+        <button className={`tab ${tab === "sets" ? "on" : ""}`} aria-pressed={tab === "sets"} onClick={() => setTab("sets")}>
           Sets ({decks.length})
         </button>
         <button
           className={`tab ${tab === "rules" ? "on" : ""}`}
+          aria-pressed={tab === "rules"}
           onClick={() => {
             setTab("rules");
             stopPick();
@@ -377,15 +398,20 @@ export function Home() {
           Rules ({rules.length})
         </button>
       </div>
+      <input type="search" className="field search-field" aria-label="Search your library" placeholder="Search your library…" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
 
       {tab === "sets" && (
         <>
           <div className="terms-heading row-head">
-            <h2>Library</h2>
+            <h2>Your sets</h2>
+            <div className="filter-group" aria-label="Filter sets">{([ ["all", "All sets"], ["mine", "Created by you"], ["shared", "Shared with you"] ] as const).map(([value, label]) => <button key={value} className={scope === value ? "on" : ""} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</div>
           </div>
+          {loading && <p className="working-status" role="status"><span className="spinner tiny" aria-hidden />Opening your library…</p>}
+          {!loading && decks.length === 0 && <div className="empty-state"><span className="empty-icon" aria-hidden>✧</span><h3>Your vocabulary journey starts here.</h3><p>Create a set, add a few words, and find your rhythm.</p><button className="primary" onClick={() => setComposer("set")}>Create your first set</button></div>}
+          {!loading && decks.length > 0 && visibleDecks.length === 0 && <div className="empty-state"><h3>No sets found</h3><p>Try a different search or filter.</p><button className="ghost" onClick={() => { setQuery(""); setScope("all"); }}>Show all sets</button></div>}
           <div className="grid">
-            {decks.length === 0 && <p className="meta">No sets yet. Create one when you need it.</p>}
-            {decks.map((d) => {
+            {visibleDecks.map((d) => {
               const owner = d.is_owner !== false && !d.shared;
               const meta = (
                 <p className="meta">
@@ -417,12 +443,15 @@ export function Home() {
                     </button>
                   ) : (
                     <Link className="deck-card-hit" to={`/decks/${d.id}`}>
+                      <div className="deck-card-top"><span className="set-symbol" aria-hidden>Aa</span><span className="badge">{d.card_count || 0} word{d.card_count === 1 ? "" : "s"}</span></div>
                       <h3>{d.name}</h3>
                       {meta}
                     </Link>
                   )}
                   {!picking && renamingId !== d.id && (
                     <div className="card-actions">
+                      {owner && <Link className="ghost add-words-link" to={`/decks/${d.id}?add=1`}>+ Add words</Link>}
+                      <details className="card-menu"><summary aria-label={`Options for ${d.name}`}>•••</summary><div className="card-menu-items">
                       {owner && (
                         <button
                           type="button"
@@ -452,6 +481,8 @@ export function Home() {
                           Delete
                         </button>
                       )}
+                      {!owner && <span className="meta">Shared by {d.owner_username}</span>}
+                      </div></details>
                     </div>
                   )}
                   {shareDeckId === d.id && !picking && (
@@ -474,8 +505,8 @@ export function Home() {
 
       {tab === "rules" && (
         <div className="grid">
-          {rules.length === 0 && <p className="meta">No rules yet. Generate one from a prompt or screenshot.</p>}
-          {rules.map((rule) => (
+          {visibleRules.length === 0 && <div className="empty-state"><h3>{query ? "No matching rules" : "Make grammar click."}</h3><p>{query ? "Try another search." : "Turn a question or screenshot into a clear explanation and practice."}</p>{!query && <button className="primary" onClick={() => setComposer("rule")}>Create a rule</button>}</div>}
+          {visibleRules.map((rule) => (
             <article key={rule.id} className="deck-card">
               <Link className="deck-card-hit" to={`/rules/${rule.id}`}>
                 <h3>{rule.title}</h3>

@@ -6,7 +6,8 @@
     "dev:api": "bun run --cwd server dev",
     "dev:web": "bun run --cwd web dev",
     "install:all": "bun install --cwd server && bun install --cwd web",
-    "typecheck": "bun run --cwd web typecheck",
+    "typecheck": "bun run --cwd web typecheck && web/node_modules/.bin/tsc --noEmit -p server/tsconfig.json",
+    "test": "bun test server",
     "build": "bun run --cwd web build"
   }
 }

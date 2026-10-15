@@ -27,10 +27,11 @@ export function Welcome() {
   return (
     <div className="welcome">
       <form className="welcome-card" onSubmit={onSubmit}>
-        <div className="eyebrow">Study sets</div>
-        <h1>Flashcards, Learn, and Test for your words.</h1>
+        <div className="brand" style={{ marginBottom: 30 }}><span className="brand-mark" aria-hidden>✳</span><strong>Lumen</strong></div>
+        <div className="eyebrow">A little every day</div>
+        <h1>Small words.<br />A world of possibility.</h1>
         <p className="lede">
-          Type words, photograph a list, or import a set from a link or JSON. Then share it by username.
+          Turn your notes and screenshots into study sets. Find your rhythm with flashcards, learning, and practice tests.
         </p>
         <label htmlFor="username">Username</label>
         <input
@@ -39,8 +40,12 @@ export function Welcome() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="e.g. nika"
+          autoComplete="username"
+          maxLength={32}
+          disabled={busy}
           autoFocus
         />
+        <p className="field-hint">Enter your username to open your library, or choose a new one to get started.</p>
         {error && <p className="error">{error}</p>}
         <div style={{ marginTop: 18 }}>
           <button className="primary" disabled={busy || username.trim().length < 2}>

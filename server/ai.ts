@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { uniqueIncoming } from "./words";
 
 const MODEL = "openai/gpt-5-nano";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -164,7 +165,7 @@ Return JSON only: {"words":["word or short phrase",...],"sourceLang":"ISO 639-1 
 This deck is ${opts.sourceLang} → ${target}.
 Rules:
 - Extract ONLY vocabulary written in ${source}.
-- Ignore text in ${target} and in every other language (captions, UI, translations, English chrome, mixed headings).
+- Ignore translations, captions, UI, and headings. ${opts.sourceLang === target ? "The source and target language match; still extract vocabulary in that language." : `Ignore text in ${target} and in every other language.`}
 - Keep original spelling of each kept word/phrase.
 - Skip numbers and full paragraphs unless they are clearly vocab items in the source language.
 - Deduplicate case-insensitively.
@@ -175,7 +176,7 @@ Rules:
     [
       {
         type: "text",
-        text: `Extract only ${opts.sourceLang === "auto" ? "source-language" : opts.sourceLang} vocabulary. Ignore ${target} and other languages.`,
+        text: `Extract only ${opts.sourceLang === "auto" ? "source-language" : opts.sourceLang} vocabulary. Ignore interface text and translations.`,
       },
       { type: "image_url", image_url: { url: dataUrl } },
     ],
@@ -186,7 +187,7 @@ Rules:
     ? json.words.map((w: unknown) => String(w).trim()).filter(Boolean)
     : [];
   const sourceLang = String(json.sourceLang || opts.sourceLang || "und");
-  return { words: uniqueWords(words), sourceLang };
+  return { words: uniqueIncoming(words).slice(0, 500), sourceLang };
 }
 
 export async function generateCards(opts: {
@@ -238,15 +239,7 @@ Rules:
 }
 
 function uniqueWords(words: string[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const w of words) {
-    const key = w.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(w.trim());
-  }
-  return out.slice(0, 40);
+  return uniqueIncoming(words).slice(0, 40);
 }
 
 export type GeneratedCheck = {

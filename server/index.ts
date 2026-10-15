@@ -29,6 +29,7 @@ import {
 } from "./db";
 import { extractWordsFromImage, generateCards, generateRule, synthesizeSpeech } from "./ai";
 import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
+import { uniqueIncoming, wordKey } from "./words";
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -83,7 +84,7 @@ async function readJson<T>(req: Request): Promise<T> {
   return (await req.json()) as T;
 }
 
-Bun.serve({
+export const server = Bun.serve({
   port: PORT,
   hostname: HOST,
   idleTimeout: 255,
@@ -112,7 +113,7 @@ Bun.serve({
         const text = body.text?.trim() || "";
         if (!text) return bad("text required");
         const audio = await synthesizeSpeech(text, body.lang);
-        return new Response(audio, {
+        return new Response(new Uint8Array(audio), {
           status: 200,
           headers: {
             "Content-Type": "audio/mpeg",
@@ -281,7 +282,7 @@ Bun.serve({
         const deck = await findDeckById(Number(deckMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || body.userId || 0);
-        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
+        if (!actorId || deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
         const name = body.name?.trim();
         if (body.name !== undefined && !name) return bad("Deck name required");
         const updated = await updateDeck(deck.id, {
@@ -350,12 +351,12 @@ Bun.serve({
         const deck = await findDeckById(Number(dedupeMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
-        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
+        if (!actorId || deck.user_id !== actorId) return json({ error: "Only the owner can edit this deck" }, 403);
         const cards = await listCards(deck.id, "asc");
         const keep = new Map<string, Card>();
         const removeIds: number[] = [];
         for (const card of cards) {
-          const key = card.word.trim().toLowerCase().replace(/\s+/g, " ");
+          const key = wordKey(card.word);
           const current = keep.get(key);
           if (!current) {
             keep.set(key, card);
@@ -381,11 +382,14 @@ Bun.serve({
         const deck = await findDeckById(Number(extractMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
-        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
+        if (!actorId || deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
         const form = await req.formData();
         const file = form.get("image");
         if (!(file instanceof File)) return bad("image file required");
-        if (file.size > 8 * 1024 * 1024) return bad("Image must be under 8MB");
+        if (!file.size || file.size > 8 * 1024 * 1024) return bad("Choose an image under 8 MB");
+        if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+          return bad("Use a PNG, JPEG, WebP, or GIF image");
+        }
         const bytes = Buffer.from(await file.arrayBuffer());
         const mime = file.type || "image/jpeg";
         const dataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
@@ -401,14 +405,18 @@ Bun.serve({
         const deck = await findDeckById(Number(generateMatch[1]));
         if (!deck) return notFound();
         const actorId = Number(url.searchParams.get("userId") || 0);
-        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
+        if (!actorId || deck.user_id !== actorId) return json({ error: "Only the owner can add cards" }, 403);
         const body = await readJson<{ words?: string[] }>(req);
+        if (!Array.isArray(body.words) || body.words.some((word) => typeof word !== "string")) {
+          return bad("words must be a list of words");
+        }
         const words = uniqueIncoming(body.words || []);
         if (words.length === 0) return bad("Add at least one word");
         const existing = await listCardWords(deck.id);
-        const taken = new Set(existing.map((word) => word.trim().toLowerCase()));
-        const novel = words.filter((w) => !taken.has(w.toLowerCase()));
-        let skipped = words.length - novel.length;
+        const taken = new Set(existing.map(wordKey));
+        const novel = words.filter((w) => !taken.has(wordKey(w)));
+        if (novel.length > 40) return bad("Add up to 40 new words at a time");
+        let skipped = body.words.filter((word) => word.trim()).length - novel.length;
         if (novel.length === 0) {
           const cards = await listCards(deck.id, "desc");
           return json({ deck, cards, added: 0, skipped });
@@ -423,7 +431,10 @@ Bun.serve({
         }
         let added = 0;
         for (const card of generated.cards) {
-          if (taken.has(card.word.trim().toLowerCase())) continue;
+          if (taken.has(wordKey(card.word))) {
+            skipped += 1;
+            continue;
+          }
           const ok = await insertCard(deck.id, {
             word: card.word,
             translation: card.translation,
@@ -432,7 +443,7 @@ Bun.serve({
             notes: card.notes,
           });
           if (ok) {
-            taken.add(card.word.trim().toLowerCase());
+            taken.add(wordKey(card.word));
             added += 1;
           } else {
             skipped += 1;
@@ -449,7 +460,7 @@ Bun.serve({
         if (!deck) return notFound();
         const parsed = await readImportRequest(req);
         const actorId = parsed.userId || Number(url.searchParams.get("userId") || 0);
-        if (actorId && deck.user_id !== actorId) return json({ error: "Only the owner can import cards" }, 403);
+        if (!actorId || deck.user_id !== actorId) return json({ error: "Only the owner can import cards" }, 403);
         if (parsed.cards.length === 0) return bad("No cards found in that file or link.");
         const result = await insertImported(deck.id, parsed.cards, parsed.title);
         if (parsed.title && (deck.name === "Untitled" || deck.name.toLowerCase() === "imported set")) {
@@ -490,19 +501,6 @@ Bun.serve({
 
 console.log(`Quiz Words API on http://${HOST}:${PORT}`);
 
-function uniqueIncoming(words: string[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of words) {
-    const word = raw.trim();
-    const key = word.toLowerCase();
-    if (!word || seen.has(key)) continue;
-    seen.add(key);
-    out.push(word);
-  }
-  return out;
-}
-
 function parseUsernames(values: string[]) {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -520,11 +518,11 @@ function parseUsernames(values: string[]) {
 
 async function insertImported(deckId: number, incoming: ImportedCard[], title = "") {
   const existing = await listCardWords(deckId);
-  const taken = new Set(existing.map((word) => word.trim().toLowerCase()));
+  const taken = new Set(existing.map(wordKey));
   let added = 0;
   let skipped = 0;
   for (const card of incoming) {
-    const key = card.word.trim().toLowerCase();
+    const key = wordKey(card.word);
     if (taken.has(key)) {
       skipped += 1;
       continue;

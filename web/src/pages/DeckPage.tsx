@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
+import { AddWordsPanel } from "../components/AddWordsPanel";
+import { wordKey } from "../lib/words";
 import { ModeTiles } from "../components/ModeNav";
 import { RenameName } from "../components/RenameName";
 import { SpeakButton } from "../components/SpeakButton";
@@ -11,16 +12,11 @@ import { langLabel, type Card, type Deck } from "../types";
 export function DeckPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const user = getSavedUser();
   const deckId = Number(id);
   const [deck, setDeck] = useState<Deck | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
-  const [tab, setTab] = useState<"words" | "photo" | "import">("words");
-  const [raw, setRaw] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
-  const [busy, setBusy] = useState("");
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
   const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [dedupeBusy, setDedupeBusy] = useState(false);
@@ -29,6 +25,8 @@ export function DeckPage() {
   const [sharedWith, setSharedWith] = useState<{ id: number; username: string }[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -41,84 +39,13 @@ export function DeckPage() {
         setDeck(data.deck);
         setCards(data.cards);
         setSharedWith(data.deck.shared_with || []);
-        setAddOpen(data.cards.length === 0);
+        setAddOpen(data.cards.length === 0 || params.get("add") === "1");
       })
       .catch((err) => {
         console.error("[quiz-words] load deck failed", err);
         setError(err.message);
       });
-  }, [deckId, nav, user?.id]);
-
-  async function generate(e: FormEvent) {
-    e.preventDefault();
-    const words = raw
-      .split(/[\n,;]+/)
-      .map((w) => w.trim())
-      .filter(Boolean);
-    if (words.length === 0) return;
-    setBusy("Writing translations and sentences…");
-    setError("");
-    setInfo("");
-    try {
-      const data = await api.generate(deckId, words, user?.id);
-      setCards(data.cards);
-      setDeck(data.deck);
-      setRaw("");
-      if (data.added === 0 && data.skipped > 0) {
-        setInfo(`All ${data.skipped} already exist in this set.`);
-      } else if (data.skipped > 0) {
-        setInfo(`Added ${data.added}. Skipped ${data.skipped} already in this set.`);
-      }
-    } catch (err) {
-      console.error("[quiz-words] generate failed", err);
-      setError(err instanceof Error ? err.message : "Generate failed");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function onPhoto(file: File) {
-    setPreview(URL.createObjectURL(file));
-    setPhotoBusy(true);
-    setBusy("");
-    setError("");
-    setInfo("");
-    try {
-      const data = await api.extractPhoto(deckId, file, user?.id);
-      setRaw(data.words.join("\n"));
-      setTab("words");
-      if (data.words.length === 0) {
-        setError(
-          `No ${langLabel(deck?.source_lang || "auto")} words found. Other languages in the photo are ignored.`,
-        );
-      }
-    } catch (err) {
-      console.error("[quiz-words] photo extract failed", err);
-      setError(err instanceof Error ? err.message : "Photo extract failed");
-    } finally {
-      setPhotoBusy(false);
-    }
-  }
-
-  async function onImport(payload: ImportSubmit) {
-    if (!user) return;
-    setImportBusy(true);
-    setError("");
-    setInfo("");
-    try {
-      const data = await api.importIntoDeck(deckId, { userId: user.id, ...payload });
-      setCards(data.cards);
-      setDeck(data.deck);
-      const bits = [`Imported ${data.added} card${data.added === 1 ? "" : "s"}`];
-      if (data.skipped) bits.push(`skipped ${data.skipped} already in this set`);
-      setInfo(`${bits.join(". ")}. Share it with usernames below.`);
-    } catch (err) {
-      console.error("[quiz-words] import failed", err);
-      setError(err instanceof Error ? err.message : "Import failed");
-    } finally {
-      setImportBusy(false);
-    }
-  }
+  }, [deckId, nav, user?.id, params]);
 
   async function removeDuplicates() {
     const extra = duplicateCount(cards);
@@ -126,7 +53,7 @@ export function DeckPage() {
       setInfo("No duplicate words in this set.");
       return;
     }
-    if (!confirm(`Remove ${extra} duplicate card${extra === 1 ? "" : "s"}? The first copy of each word is kept.`)) {
+    if (!confirm(`Remove ${extra} duplicate card${extra === 1 ? "" : "s"}? The copy with the most study progress is kept.`)) {
       return;
     }
     setDedupeBusy(true);
@@ -135,7 +62,7 @@ export function DeckPage() {
     try {
       const data = await api.dedupe(deckId, user?.id);
       setCards(data.cards);
-      setDeck(data.deck);
+      setDeck((current) => current ? { ...current, ...data.deck } : data.deck);
       setInfo(
         data.removed === 0
           ? "No duplicate words in this set."
@@ -193,8 +120,12 @@ export function DeckPage() {
 
   async function removeDeck() {
     if (!confirm("Delete this set?")) return;
-    await api.deleteDeck(deckId, user?.id);
-    nav("/home");
+    try {
+      await api.deleteDeck(deckId, user?.id);
+      nav("/home");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete set");
+    }
   }
 
   if (!user || !deck) {
@@ -206,6 +137,8 @@ export function DeckPage() {
   }
 
   const owner = deck.is_owner !== false && !deck.shared;
+  const visibleCards = cards.filter((card) => wordKey(`${card.word} ${card.translation}`).includes(wordKey(search)));
+  const duplicates = duplicateCount(cards);
 
   return (
     <div className="shell">
@@ -236,18 +169,13 @@ export function DeckPage() {
         </div>
         <div className="row">
           {owner && (
-            <button className={`ghost ${addOpen ? "on" : ""}`} onClick={() => setAddOpen((v) => !v)}>
-              Add cards
+            <button className="primary" aria-expanded={addOpen} onClick={() => setAddOpen((v) => !v)}>
+              {addOpen ? "Close editor" : "+ Add words"}
             </button>
           )}
           {owner && (
             <button className={`ghost ${shareOpen ? "on" : ""}`} onClick={() => setShareOpen((v) => !v)}>
               Share
-            </button>
-          )}
-          {owner && (
-            <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>
-              {dedupeBusy ? "Checking…" : "Remove duplicates"}
             </button>
           )}
           {deck.shared ? (
@@ -298,82 +226,35 @@ export function DeckPage() {
         </section>
       )}
 
-      {owner && addOpen && (
-        <section className="panel">
-          <div className="tabs">
-            <button className={`tab ${tab === "words" ? "on" : ""}`} onClick={() => setTab("words")}>
-              Words
-            </button>
-            <button className={`tab ${tab === "photo" ? "on" : ""}`} disabled={photoBusy} onClick={() => setTab("photo")}>
-              Photo
-            </button>
-            <button className={`tab ${tab === "import" ? "on" : ""}`} disabled={importBusy} onClick={() => setTab("import")}>
-              Import
-            </button>
-          </div>
+      {info && <p className="notice success" role="status">{info}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
 
-          {tab === "words" && (
-            <form onSubmit={generate}>
-              <label>One word or phrase per line (commas work too)</label>
-              <textarea
-                className="field"
-                rows={7}
-                value={raw}
-                onChange={(e) => setRaw(e.target.value)}
-                placeholder={"bonjour\nmerci\nà bientôt"}
-              />
-              <div style={{ marginTop: 12 }}>
-                <button className="primary" disabled={!!busy || photoBusy || !raw.trim()}>
-                  {busy || "Make cards"}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {tab === "photo" && (
-            <label className={`drop ${photoBusy ? "loading" : ""}`}>
-              <input
-                type="file"
-                accept="image/*"
-                disabled={photoBusy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void onPhoto(file);
-                }}
-              />
-              {photoBusy ? (
-                <div className="photo-loader">
-                  <span className="spinner" aria-hidden />
-                  <p>Reading {langLabel(deck.source_lang)} words from the photo…</p>
-                  <p className="meta">Other languages are ignored.</p>
-                </div>
-              ) : (
-                <>
-                  Drop a photo of notes, a textbook list, or a screenshot — or click to choose one.
-                  {preview && <img className="preview" src={preview} alt="Upload preview" />}
-                </>
-              )}
-            </label>
-          )}
-
-          {tab === "import" && <ImportPanel busy={importBusy} onSubmit={onImport} />}
-
-          {info && <p className="ok">{info}</p>}
-          {error && <p className="error">{error}</p>}
-        </section>
-      )}
+      {owner && <div hidden={!addOpen}>
+        <AddWordsPanel key={deck.id} deck={deck} cards={cards} userId={user.id} onAdded={(data, message) => {
+          setCards(data.cards);
+          setDeck((current) => current ? { ...current, ...data.deck } : data.deck);
+          setInfo(message);
+          setError("");
+        }} />
+      </div>}
 
       {!owner && (
         <section className="panel" style={{ marginBottom: 16 }}>
-          {info && <p className="ok">{info}</p>}
-          {error && <p className="error">{error}</p>}
           <p className="meta">Shared by {deck.owner_username}. You can study this set.</p>
         </section>
       )}
 
-      <h2 className="terms-heading">Terms ({cards.length})</h2>
+      <div className="terms-heading row-head terms-toolbar">
+        <h2>Your words <span className="count">{cards.length}</span></h2>
+        <div className="row">
+          {owner && duplicates > 0 && <button className="ghost" disabled={dedupeBusy} onClick={() => void removeDuplicates()}>{dedupeBusy ? "Removing…" : `Remove ${duplicates} duplicate${duplicates === 1 ? "" : "s"}`}</button>}
+          {cards.length > 0 && <input type="search" className="field search-field" aria-label="Search words and translations" placeholder="Search words…" value={search} onChange={(event) => setSearch(event.target.value)} />}
+        </div>
+      </div>
+      {cards.length === 0 && <div className="empty-state"><span className="empty-icon" aria-hidden>✧</span><h3>A little practice starts with a word.</h3><p>Type a list, import a file, or bring in a screenshot to build this set.</p>{owner && !addOpen && <button className="primary" onClick={() => setAddOpen(true)}>Add your first words</button>}</div>}
+      {cards.length > 0 && visibleCards.length === 0 && <div className="empty-state"><h3>No matching words</h3><p>Try another word or translation.</p><button className="ghost" onClick={() => setSearch("")}>Clear search</button></div>}
       <div className="card-list">
-        {cards.map((c) => (
+        {visibleCards.map((c) => (
           <article className="panel study-card" key={c.id}>
             <div>
               <div className="word-row">
@@ -388,9 +269,16 @@ export function DeckPage() {
             {owner && (
               <button
                 className="ghost"
+                disabled={deletingId === c.id}
+                aria-label={`Remove ${c.word}`}
                 onClick={async () => {
-                  await api.deleteCard(c.id);
-                  setCards((list) => list.filter((x) => x.id !== c.id));
+                  setDeletingId(c.id);
+                  try {
+                    await api.deleteCard(c.id);
+                    setCards((list) => list.filter((x) => x.id !== c.id));
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not remove word");
+                  } finally { setDeletingId(null); }
                 }}
               >
                 Remove
@@ -407,7 +295,7 @@ function duplicateCount(cards: Card[]) {
   const seen = new Set<string>();
   let extra = 0;
   for (const card of cards) {
-    const key = card.word.trim().toLowerCase().replace(/\s+/g, " ");
+    const key = wordKey(card.word);
     if (seen.has(key)) extra += 1;
     else seen.add(key);
   }

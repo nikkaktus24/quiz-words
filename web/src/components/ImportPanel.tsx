@@ -31,6 +31,7 @@ export function ImportPanel({
   const [url, setUrl] = useState("");
   const [paste, setPaste] = useState("");
   const [fileName, setFileName] = useState("");
+  const [error, setError] = useState("");
 
   async function sendUrl(e: FormEvent) {
     e.preventDefault();
@@ -45,14 +46,23 @@ export function ImportPanel({
   }
 
   async function onFile(file: File) {
-    setFileName(file.name);
-    const text = await file.text();
-    const payload = parseClientPayload(text);
-    if (deferFile && onStage) {
-      onStage(payload, file.name);
+    setError("");
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Choose a text or JSON file under 5 MB.");
       return;
     }
-    await onSubmit(payload);
+    setFileName(file.name);
+    try {
+      const text = await file.text();
+      const payload = parseClientPayload(text);
+      if (deferFile && onStage) {
+        onStage(payload, file.name);
+        return;
+      }
+      await onSubmit(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read this file.");
+    }
   }
 
   return (
@@ -99,7 +109,11 @@ export function ImportPanel({
         </button>
       </form>
 
-      <label className={`drop ${busy ? "loading" : ""}`}>
+      <label className={`drop ${busy ? "loading" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files[0];
+        if (file && !busy) void onFile(file);
+      }}>
         <input
           type="file"
           accept=".json,.txt,.tsv,.csv,application/json,text/plain"
@@ -107,6 +121,7 @@ export function ImportPanel({
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) void onFile(file);
+            e.target.value = "";
           }}
         />
         {busy ? (
@@ -160,6 +175,7 @@ export function ImportPanel({
           </button>
         </div>
       </form>
+      {error && <p className="error" role="alert">{error}</p>}
     </div>
   );
 }

@@ -25,6 +25,24 @@ bun run dev
 
 Enter a username (creates a profile if it is new, otherwise opens the existing one). Create a deck, paste words or upload a photo, then study.
 
+## Adding words
+
+- Choose **Add words** on a library card or inside an existing set. New cards are appended; existing cards and study progress are kept.
+- Type words, or choose **Photos & screenshots** to upload multiple images, drag and drop them, or paste a screenshot while the editor is focused. Supported formats: PNG, JPEG, WebP, and GIF, up to 8 MB each.
+- Choose **Read images**, review and edit the extracted words, then add them. Typed words and words from multiple images are combined. Lists of up to 500 new words are processed in batches of 40, with unfinished words kept for retry.
+- Duplicates are skipped within the incoming list and against the current set, ignoring case, extra whitespace, and equivalent Unicode forms. Accents and punctuation remain significant. Existing duplicates can be removed from the set’s word toolbar; the copy with the most study activity is kept.
+- Use **Import** for existing translations from a set link, JSON, or text file.
+
+## Checks
+
+```bash
+bun run typecheck
+bun run test
+bun run build
+```
+
+The HTTP regression tests use an in-memory database substitute and mock AI responses. They do not need MongoDB or an API key.
+
 ## Docker
 
 ```bash

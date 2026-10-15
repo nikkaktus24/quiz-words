@@ -1,3 +1,5 @@
+import { wordKey } from "./words";
+
 export type ImportedCard = {
   word: string;
   translation: string;
@@ -232,7 +234,7 @@ function uniqueCards(cards: ImportedCard[]) {
   const seen = new Set<string>();
   const out: ImportedCard[] = [];
   for (const card of cards) {
-    const key = card.word.trim().toLowerCase();
+    const key = wordKey(card.word);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push({

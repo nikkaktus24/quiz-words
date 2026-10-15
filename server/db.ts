@@ -1,4 +1,5 @@
 import { MongoClient, type Collection, type Db } from "mongodb";
+import { wordKey } from "./words";
 
 const uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
 const dbName = process.env.MONGODB_DB || "quiz";
@@ -275,7 +276,7 @@ export async function insertCard(
     id: await nextId("cards"),
     deck_id: deckId,
     word,
-    word_lc: word.toLowerCase(),
+    word_lc: wordKey(word),
     translation,
     sentence: input.sentence?.trim() || "",
     sentence_translation: input.sentenceTranslation?.trim() || "",
@@ -354,7 +355,7 @@ export async function listStudyCards(userId: number, deckIds: number[]) {
   const docs = await cards.find({ deck_id: { $in: allowed } }).toArray();
   const keep = new Map<string, CardDoc>();
   for (const doc of docs) {
-    const key = doc.word_lc.trim() || doc.word.trim().toLowerCase();
+    const key = wordKey(doc.word);
     const current = keep.get(key);
     if (!current) {
       keep.set(key, doc);
