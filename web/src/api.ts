@@ -155,15 +155,20 @@ export const api = {
       target_lang: string;
     }>(`/api/study?${q}`);
   },
+  groups(userId: number) { return request<{ groups: Group[] }>(`/api/groups?userId=${userId}`); },
+  createGroup(userId: number, name: string) { return request<Group>("/api/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, name }) }); },
+  updateGroup(id: number, userId: number, patch: { name?: string; deckIds?: number[] }) { return request<Group>(`/api/groups/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...patch }) }); },
+  deleteGroup(id: number, userId: number) { return request<{ ok: boolean }>(`/api/groups/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }); },
   userRules(userId: number) {
     return request<{ rules: Rule[] }>(`/api/users/${userId}/rules`);
   },
-  createRule(body: { userId: number; title?: string; prompt?: string; image?: File }) {
+  createRule(body: { userId: number; title?: string; prompt?: string; image?: File; language?: string }) {
     const form = new FormData();
     form.append("userId", String(body.userId));
     if (body.title) form.append("title", body.title);
     if (body.prompt) form.append("prompt", body.prompt);
     if (body.image) form.append("image", body.image);
+    if (body.language) form.append("language", body.language);
     return request<{ rule: Rule; checks: RuleCheck[] }>("/api/rules", { method: "POST", body: form });
   },
   rule(id: number, userId?: number) {
@@ -227,3 +232,5 @@ export type ImportResult = {
   skipped: number;
   title: string;
 };
+
+export type Group = { id: number; user_id: number; name: string; deck_ids: number[] };

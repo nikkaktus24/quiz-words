@@ -1195,3 +1195,9 @@ h2 { font-size: 21px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+.groups-panel { margin: 20px 0; padding: 22px; }
+.groups-panel .row { margin-top: 16px; }
+.group-list, .group-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.group-membership summary { font-size: 12px; letter-spacing: 0; }
+.group-option { display: flex; align-items: center; gap: 8px; padding: 8px; color: var(--ink); overflow-wrap: anywhere; }
+.group-option input { flex-shrink: 0; }

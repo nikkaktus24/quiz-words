@@ -52,6 +52,9 @@ export function RulePage() {
       </header>
 
       <div className="mode-grid">
+        <Link className={`mode-tile ${count === 0 ? "off" : ""}`} to={count ? `/rules/${rule.id}/cards` : "#"}>
+          <div><strong>Flashcards</strong><p>Review each question and reveal the answer.</p></div>
+        </Link>
         <Link className={`mode-tile learn ${count === 0 ? "off" : ""}`} to={count ? `/rules/${rule.id}/learn` : "#"}>
           <div>
             <strong>Learn</strong>

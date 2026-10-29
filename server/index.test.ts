@@ -8,9 +8,14 @@ const original: Card = { id: 1, deck_id: 7, word: "bonjour", translation: "hello
 let cards: Card[] = [];
 let generatedWords: string[] = [];
 let extractCalls = 0;
+let groups: Array<{ id: number; user_id: number; name: string; deck_ids: number[] }> = [];
 
 mock.module("./db", () => ({
   ...Object.fromEntries(["addShare", "createDeck", "createRule", "createUser", "deleteCardById", "deleteDeck", "deleteRule", "findRuleById", "findUserByUsername", "incrementCheckReview", "incrementReview", "insertRuleChecks", "listRuleChecks", "listStudyCards", "listUserRules", "removeShare"].map((name) => [name, async () => null])),
+  listGroups: async (userId: number) => groups.filter((group) => group.user_id === userId),
+  createGroup: async (userId: number, name: string) => { const group = { id: 1, user_id: userId, name, deck_ids: [] as number[] }; groups.push(group); return group; },
+  updateGroup: async (id: number, userId: number, patch: { name?: string; deck_ids?: number[] }) => { const group = groups.find((item) => item.id === id && item.user_id === userId); return group ? Object.assign(group, patch) : null; },
+  deleteGroup: async (id: number, userId: number) => { const before = groups.length; groups = groups.filter((item) => item.id !== id || item.user_id !== userId); return groups.length < before; },
   findUserById: async () => ({ id: 1, username: "demo" }),
   canAccessDeck: async () => true,
   findDeckById: async (id: number) => id === 7 ? { ...deck } : null,
@@ -41,7 +46,7 @@ process.env.HOST = "127.0.0.1";
 const { server } = await import("./index");
 const base = `http://127.0.0.1:${server.port}`;
 afterAll(() => server.stop(true));
-beforeEach(() => { cards = [{ ...original }]; generatedWords = []; extractCalls = 0; });
+beforeEach(() => { cards = [{ ...original }]; generatedWords = []; extractCalls = 0; groups = []; });
 
 function post(path: string, body: unknown) {
   return fetch(`${base}/api/decks/7/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -112,4 +117,16 @@ test("empty, unsupported, and oversized images are rejected before AI", async ()
     expect((await fetch(`${base}/api/decks/7/extract-photo?userId=1`, { method: "POST", body: form })).status).toBe(400);
   }
   expect(extractCalls).toBe(0);
+});
+
+
+test("groups organize accessible sets and remain private to the owner", async () => {
+  const send = (path: string, method: string, body: unknown) => fetch(`${base}/api/groups${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  expect((await send("", "POST", { userId: 1, name: "French" })).status).toBe(201);
+  expect((await send("/1", "PATCH", { userId: 1, deckIds: [7, 7] })).status).toBe(200);
+  expect(groups[0].deck_ids).toEqual([7]);
+  expect((await send("/1", "PATCH", { userId: 1, deckIds: [999] })).status).toBe(403);
+  expect((await send("/1", "DELETE", { userId: 2 })).status).toBe(404);
+  expect((await send("/1", "DELETE", { userId: 1 })).status).toBe(200);
+  expect(cards).toHaveLength(1);
 });

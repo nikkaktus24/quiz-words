@@ -250,11 +250,12 @@ export type GeneratedCheck = {
   explanation: string;
 };
 
-export async function generateRule(opts: { prompt?: string; imageDataUrl?: string }) {
+export async function generateRule(opts: { prompt?: string; imageDataUrl?: string; language?: string }) {
   const text = opts.prompt?.trim() || "";
   if (!text && !opts.imageDataUrl) throw new Error("Write a rule or attach a screenshot.");
 
   const system = `You are a language tutor. Explain ONE grammar or usage rule as a visual study sheet.
+Write all explanations, question prompts and explanations in the language identified by ISO code ${opts.language || "en"}. Keep example sentences in the language being taught and translate them into the explanation language. Keep true/false answers as the literal strings "true" or "false".
 Return JSON only:
 {
   "title":"short title",
@@ -274,7 +275,7 @@ Copy this structure:
 <h3>When to use it</h3>
 <ul><li>...</li></ul>
 <table><thead><tr><th>Use</th><th>Example</th></tr></thead><tbody><tr><td>...</td><td><span class="ex">...</span></td></tr></tbody></table>
-Keep it compact: one formula box, one good-vs-bad pair, a short list or table. No walls of prose.
+Give a thorough but structured explanation: meaning, formation and word order, when to use it, exceptions, common mistakes, and several varied examples with translations. Explain why incorrect examples are wrong. Use headings, concise lists and tables.
 Create 8-12 checks mixing mcq, write, and tf.
 For tf, answer must be "true" or "false".
 For mcq, include 4 options and answer must be one of them.`;

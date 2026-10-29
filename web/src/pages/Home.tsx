@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, type Group } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
 import { RenameName } from "../components/RenameName";
 import { getLangPrefs, saveLangPrefs } from "../lib/prefs";
@@ -13,6 +13,11 @@ export function Home() {
   const langs = getLangPrefs();
   const [tab, setTab] = useState<"sets" | "rules">("sets");
   const [decks, setDecks] = useState<Deck[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const [groupId, setGroupId] = useState<number | null>(null);
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [ruleLanguage, setRuleLanguage] = useState(langs.targetLang);
   const [rules, setRules] = useState<Rule[]>([]);
   const [composer, setComposer] = useState<"set" | "rule" | "">("");
   const [name, setName] = useState("");
@@ -46,6 +51,7 @@ export function Home() {
       .then((data) => setDecks(data.decks))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+    api.groups(user.id).then((data) => setGroups(data.groups)).catch((err) => setError(err.message));
     api
       .userRules(user.id)
       .then((data) => setRules(data.rules))
@@ -134,6 +140,7 @@ export function Home() {
     try {
       const data = await api.createRule({
         userId: me.id,
+        language: ruleLanguage,
         title: ruleTitle.trim() || undefined,
         prompt: rulePrompt.trim() || undefined,
         image: ruleImage || undefined,
@@ -185,7 +192,7 @@ export function Home() {
   }
 
   const reviewHref = (mode: string) => `/review/${mode}?ids=${selected.join(",")}`;
-  const visibleDecks = decks.filter((deck) => deck.name.toLowerCase().includes(query.trim().toLowerCase()) && (scope === "all" || (scope === "shared" ? deck.shared : !deck.shared)));
+  const visibleDecks = decks.filter((deck) => (groupId === null || groups.find((group) => group.id === groupId)?.deck_ids.includes(deck.id)) && deck.name.toLowerCase().includes(query.trim().toLowerCase()) && (scope === "all" || (scope === "shared" ? deck.shared : !deck.shared)));
   const visibleRules = rules.filter((rule) => rule.title.toLowerCase().includes(query.trim().toLowerCase()));
   const wordCount = decks.reduce((total, deck) => total + (deck.card_count || 0), 0);
 
@@ -330,6 +337,13 @@ export function Home() {
               <input className="field" value={ruleTitle} onChange={(e) => setRuleTitle(e.target.value)} placeholder="Past simple vs present perfect" />
             </div>
             <div>
+              <label htmlFor="rule-language">Explanation language</label>
+              <select id="rule-language" className="field" value={ruleLanguage} onChange={(e) => setRuleLanguage(e.target.value)}>
+                {LANGS.filter((language) => language.code !== "auto").map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+              </select>
+              <p className="field-hint">Explanations and practice questions will use this language.</p>
+            </div>
+            <div>
               <label>Describe the rule</label>
               <textarea
                 className="field"
@@ -403,13 +417,33 @@ export function Home() {
 
       {tab === "sets" && (
         <>
+          <section className="panel groups-panel" aria-label="Set groups">
+            <div className="row-head"><div><h2>Groups</h2><p className="meta">Organize your sets and study a group together.</p></div></div>
+            <form className="row" onSubmit={async (event) => {
+              event.preventDefault(); if (!groupName.trim()) return; setGroupBusy(true); setError("");
+              try { const group = await api.createGroup(me.id, groupName.trim()); setGroups((current) => [...current, group]); setGroupName(""); setGroupId(group.id); }
+              catch (err) { setError(err instanceof Error ? err.message : "Could not create group"); } finally { setGroupBusy(false); }
+            }}>
+              <input className="field grow" aria-label="New group name" placeholder="New group name" maxLength={80} value={groupName} onChange={(event) => setGroupName(event.target.value)} />
+              <button className="ghost" disabled={groupBusy || !groupName.trim()}>Create group</button>
+            </form>
+            <div className="group-list">
+              <button className={`ghost ${groupId === null ? "on" : ""}`} onClick={() => setGroupId(null)}>All sets</button>
+              {groups.map((group) => <button key={group.id} className={`ghost ${groupId === group.id ? "on" : ""}`} onClick={() => setGroupId(group.id)}>{group.name} · {group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)).length}</button>)}
+            </div>
+            {groupId !== null && (() => { const group = groups.find((item) => item.id === groupId); if (!group) return null; const ids = group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)); return <div className="group-actions">
+              {ids.length > 0 && <Link className="primary" to={`/review/cards?ids=${ids.join(",")}`}>Study group</Link>}
+              <button className="ghost" onClick={async () => { const name = prompt("Rename group", group.name)?.trim(); if (!name || name === group.name) return; try { const updated = await api.updateGroup(group.id, me.id, { name }); setGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); } catch (err) { setError(err instanceof Error ? err.message : "Could not rename group"); } }}>Rename</button>
+              <button className="danger" onClick={async () => { if (!confirm(`Delete group “${group.name}”? Its sets will remain in your library.`)) return; try { await api.deleteGroup(group.id, me.id); setGroups((current) => current.filter((item) => item.id !== group.id)); setGroupId(null); } catch (err) { setError(err instanceof Error ? err.message : "Could not delete group"); } }}>Delete group</button>
+            </div>; })()}
+          </section>
           <div className="terms-heading row-head">
             <h2>Your sets</h2>
             <div className="filter-group" aria-label="Filter sets">{([ ["all", "All sets"], ["mine", "Created by you"], ["shared", "Shared with you"] ] as const).map(([value, label]) => <button key={value} className={scope === value ? "on" : ""} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</div>
           </div>
           {loading && <p className="working-status" role="status"><span className="spinner tiny" aria-hidden />Opening your library…</p>}
           {!loading && decks.length === 0 && <div className="empty-state"><span className="empty-icon" aria-hidden>✧</span><h3>Your vocabulary journey starts here.</h3><p>Create a set, add a few words, and find your rhythm.</p><button className="primary" onClick={() => setComposer("set")}>Create your first set</button></div>}
-          {!loading && decks.length > 0 && visibleDecks.length === 0 && <div className="empty-state"><h3>No sets found</h3><p>Try a different search or filter.</p><button className="ghost" onClick={() => { setQuery(""); setScope("all"); }}>Show all sets</button></div>}
+          {!loading && decks.length > 0 && visibleDecks.length === 0 && <div className="empty-state"><h3>No sets found</h3><p>{groupId !== null ? "Add sets to this group from All sets." : "Try a different search or filter."}</p><button className="ghost" onClick={() => { setQuery(""); setScope("all"); setGroupId(null); }}>Show all sets</button></div>}
           <div className="grid">
             {visibleDecks.map((d) => {
               const owner = d.is_owner !== false && !d.shared;
@@ -450,6 +484,7 @@ export function Home() {
                   )}
                   {!picking && renamingId !== d.id && (
                     <div className="card-actions">
+                      {groups.length > 0 && <details className="card-menu group-membership"><summary>Groups</summary><div className="card-menu-items">{groups.map((group) => <label key={group.id} className="group-option"><input type="checkbox" checked={group.deck_ids.includes(d.id)} onChange={async (event) => { const availableIds = group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)); const deckIds = event.target.checked ? [...availableIds, d.id] : availableIds.filter((id) => id !== d.id); try { const updated = await api.updateGroup(group.id, me.id, { deckIds }); setGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); } catch (err) { setError(err instanceof Error ? err.message : "Could not update group"); } }} />{group.name}</label>)}</div></details>}
                       {owner && <Link className="ghost add-words-link" to={`/decks/${d.id}?add=1`}>+ Add words</Link>}
                       <details className="card-menu"><summary aria-label={`Options for ${d.name}`}>•••</summary><div className="card-menu-items">
                       {owner && (

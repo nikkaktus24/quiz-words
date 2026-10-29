@@ -1,5 +1,6 @@
 import {
   addShare,
+  listGroups, createGroup, updateGroup, deleteGroup,
   canAccessDeck,
   createDeck,
   createRule,
@@ -144,6 +145,40 @@ export const server = Bun.serve({
         return json({ user, decks });
       }
 
+      if (path === "/api/groups" && method === "GET") {
+        const userId = Number(url.searchParams.get("userId"));
+        if (!userId || !(await findUserById(userId))) return bad("Valid userId required");
+        return json({ groups: await listGroups(userId) });
+      }
+      if (path === "/api/groups" && method === "POST") {
+        const body = await readJson<{ userId?: number; name?: string }>(req);
+        if (!body.userId || !(await findUserById(body.userId))) return bad("Valid userId required");
+        const name = body.name?.trim();
+        if (!name || name.length > 80) return bad("Group name must be 1–80 characters");
+        return json(await createGroup(body.userId, name), 201);
+      }
+      const groupMatch = path.match(/^\/api\/groups\/(\d+)$/);
+      if (groupMatch && (method === "PATCH" || method === "DELETE")) {
+        const body = await readJson<{ userId?: number; name?: string; deckIds?: number[] }>(req);
+        if (!body.userId) return bad("userId required");
+        const id = Number(groupMatch[1]);
+        if (method === "DELETE") return (await deleteGroup(id, body.userId)) ? json({ ok: true }) : notFound();
+        const patch: { name?: string; deck_ids?: number[] } = {};
+        if (body.name !== undefined) {
+          const name = body.name.trim();
+          if (!name || name.length > 80) return bad("Group name must be 1–80 characters");
+          patch.name = name;
+        }
+        if (body.deckIds !== undefined) {
+          if (!Array.isArray(body.deckIds) || body.deckIds.some((id) => !Number.isInteger(id) || id <= 0)) return bad("Invalid set IDs");
+          const allowed = new Set((await listUserDecks(body.userId)).map((deck) => deck.id));
+          if (body.deckIds.some((id) => !allowed.has(id))) return json({ error: "You do not have access to one of these sets" }, 403);
+          patch.deck_ids = [...new Set(body.deckIds)];
+        }
+        const group = await updateGroup(id, body.userId, patch);
+        return group ? json(group) : notFound();
+      }
+
       if (method === "GET" && path === "/api/study") {
         const actorId = Number(url.searchParams.get("userId") || 0);
         if (!actorId) return bad("userId required");
@@ -167,7 +202,7 @@ export const server = Bun.serve({
         if (!parsed.userId) return bad("userId required");
         const user = await findUserById(parsed.userId);
         if (!user) return json({ error: "User not found" }, 404);
-        const generated = await generateRule({ prompt: parsed.prompt, imageDataUrl: parsed.imageDataUrl });
+        const generated = await generateRule({ prompt: parsed.prompt, imageDataUrl: parsed.imageDataUrl, language: parsed.language });
         const rule = await createRule({
           userId: parsed.userId,
           title: parsed.title || generated.title,
@@ -616,14 +651,16 @@ async function readRuleRequest(req: Request) {
       title: String(form.get("title") || "").trim(),
       prompt: String(form.get("prompt") || "").trim(),
       imageDataUrl,
+      language: String(form.get("language") || "en").trim(),
     };
   }
-  const body = await readJson<{ userId?: number; title?: string; prompt?: string; image?: string }>(req);
+  const body = await readJson<{ userId?: number; title?: string; prompt?: string; image?: string; language?: string }>(req);
   return {
     userId: Number(body.userId || 0),
     title: body.title?.trim() || "",
     prompt: body.prompt?.trim() || "",
     imageDataUrl: body.image?.trim() || "",
+    language: body.language?.trim() || "en",
   };
 }
 

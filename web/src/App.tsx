@@ -6,6 +6,7 @@ import { StudyPage } from "./pages/StudyPage";
 import { FlashcardsPage } from "./pages/FlashcardsPage";
 import { LearnPage } from "./pages/LearnPage";
 import { TestPage } from "./pages/TestPage";
+import { RuleCardsPage } from "./pages/RuleCardsPage";
 import { RulePage } from "./pages/RulePage";
 import { RuleLearnPage } from "./pages/RuleLearnPage";
 import { RuleTestPage } from "./pages/RuleTestPage";
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/review/learn" element={<LearnPage />} />
       <Route path="/review/test" element={<TestPage />} />
       <Route path="/rules/:id" element={<RulePage />} />
+      <Route path="/rules/:id/cards" element={<RuleCardsPage />} />
       <Route path="/rules/:id/learn" element={<RuleLearnPage />} />
       <Route path="/rules/:id/test" element={<RuleTestPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

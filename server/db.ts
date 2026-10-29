@@ -58,6 +58,8 @@ let cards: Collection<CardDoc>;
 let shares: Collection<ShareDoc>;
 let rules: Collection<RuleDoc>;
 let checks: Collection<CheckDoc>;
+type GroupDoc = { id: number; user_id: number; name: string; deck_ids: number[] };
+let groups: Collection<GroupDoc>;
 
 async function waitForDb() {
   const deadline = Date.now() + 120_000;
@@ -91,6 +93,9 @@ cards = database.collection("cards");
 shares = database.collection("deck_shares");
 rules = database.collection("rules");
 checks = database.collection("rule_checks");
+groups = database.collection("deck_groups");
+await groups.createIndex({ id: 1 }, { unique: true });
+await groups.createIndex({ user_id: 1 });
 
 await users.createIndex({ id: 1 }, { unique: true });
 await users.createIndex({ username_lc: 1 }, { unique: true });
@@ -539,3 +544,19 @@ export type RuleCheck = {
   unknown_count: number;
   created_at: string;
 };
+
+export async function listGroups(userId: number) {
+  return groups.find({ user_id: userId }, { projection: { _id: 0 } }).sort({ id: 1 }).toArray();
+}
+export async function createGroup(userId: number, name: string) {
+  const group = { id: await nextId("deck_groups"), user_id: userId, name, deck_ids: [] as number[] };
+  await groups.insertOne(group);
+  return { id: group.id, user_id: userId, name, deck_ids: [] as number[] };
+}
+export async function updateGroup(id: number, userId: number, patch: { name?: string; deck_ids?: number[] }) {
+  await groups.updateOne({ id, user_id: userId }, { $set: patch });
+  return groups.findOne({ id, user_id: userId }, { projection: { _id: 0 } });
+}
+export async function deleteGroup(id: number, userId: number) {
+  return (await groups.deleteOne({ id, user_id: userId })).deletedCount > 0;
+}
