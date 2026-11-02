@@ -70,3 +70,11 @@ The workflow does **not** run on push or pull request. Start it by hand: **Actio
 - `{DOCKER_USERNAME}/quiz-words-web:latest` (and the commit SHA)
 
 Same login as hutka: repo secrets `DOCKER_USERNAME` and `DOCKER_PASSWORD`. Forks do not receive these secrets.
+
+## Organizing the library
+
+Use **Manage groups** to edit a group's name and select its sets in one place. Group labels on set cards show membership; select a group to filter the library or study it together.
+
+**Merge / AI organize** works on selected sets with the same language pair (up to 20 sets and 400 unique words). Merge creates one combined set. AI suggests a topic-based split and displays every proposed word before **Approve changes** or **Reject proposal**. Approval creates new sets, copies study activity, and keeps the source sets. Duplicate words use the copy with the most study activity. Proposals expire after 24 hours and can only be applied once.
+
+The saved profile now opens the library automatically when visiting the start page. Use **Switch** to leave the saved profile. Browser storage is specific to the site's origin, so use the same host and port when returning.

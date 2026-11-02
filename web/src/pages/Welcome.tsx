@@ -1,10 +1,11 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { saveUser } from "../session";
+import { saveUser, getSavedUser } from "../session";
 
 export function Welcome() {
   const nav = useNavigate();
+  useEffect(() => { if (getSavedUser()) nav("/home", { replace: true }); }, [nav]);
   const [username, setUsername] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

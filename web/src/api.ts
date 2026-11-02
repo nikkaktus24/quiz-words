@@ -155,6 +155,12 @@ export const api = {
       target_lang: string;
     }>(`/api/study?${q}`);
   },
+  organizationPreview(userId: number, deckIds: number[], mode: "merge" | "ai", name: string) {
+    return request<OrganizationPreview>("/api/organization/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, deckIds, mode, name }) });
+  },
+  organizationDecision(id: string, userId: number, decision: "approve" | "reject") {
+    return request<{ deckIds: number[] }>(`/api/organization/${id}/${decision}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) });
+  },
   groups(userId: number) { return request<{ groups: Group[] }>(`/api/groups?userId=${userId}`); },
   createGroup(userId: number, name: string) { return request<Group>("/api/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, name }) }); },
   updateGroup(id: number, userId: number, patch: { name?: string; deckIds?: number[] }) { return request<Group>(`/api/groups/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...patch }) }); },
@@ -234,3 +240,5 @@ export type ImportResult = {
 };
 
 export type Group = { id: number; user_id: number; name: string; deck_ids: number[] };
+
+export type OrganizationPreview = { id: string; sets: Array<{ name: string; reason: string; words: string[] }>; duplicates: number };

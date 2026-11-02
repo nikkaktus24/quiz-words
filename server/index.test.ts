@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
 import { wordKey } from "./words";
-import type { Card, Deck } from "./db";
+import type { OrganizationDraft, Card, Deck } from "./db";
 
 // Exercise the real HTTP handlers without MongoDB or paid AI requests.
 const deck: Deck = { id: 7, user_id: 1, name: "Everyday French", source_lang: "fr", target_lang: "en", created_at: "2026-10-15" };
@@ -8,17 +8,26 @@ const original: Card = { id: 1, deck_id: 7, word: "bonjour", translation: "hello
 let cards: Card[] = [];
 let generatedWords: string[] = [];
 let extractCalls = 0;
+let draft: OrganizationDraft | null = null;
+let copies: Array<{ deckId: number; card: Card }> = [];
+let createdCount = 0;
 let groups: Array<{ id: number; user_id: number; name: string; deck_ids: number[] }> = [];
 
 mock.module("./db", () => ({
   ...Object.fromEntries(["addShare", "createDeck", "createRule", "createUser", "deleteCardById", "deleteDeck", "deleteRule", "findRuleById", "findUserByUsername", "incrementCheckReview", "incrementReview", "insertRuleChecks", "listRuleChecks", "listStudyCards", "listUserRules", "removeShare"].map((name) => [name, async () => null])),
+  saveOrganizationDraft: async (value: OrganizationDraft) => { draft = value; },
+  findOrganizationDraft: async (id: string, userId: number) => draft?.id === id && draft.user_id === userId ? draft : null,
+  claimOrganizationDraft: async (id: string, userId: number, status: "applying" | "rejected") => { if (draft?.id !== id || draft.user_id !== userId || draft.status !== "pending") return null; draft.status = status; return draft; },
+  finishOrganizationDraft: async (_id: string, status: "applied" | "failed", ids: number[]) => { if (draft) { draft.status = status; draft.result_ids = ids; } },
+  copyStudyCard: async (deckId: number, card: Card) => { copies.push({ deckId, card }); },
+  createDeck: async (input: { name: string }) => ({ ...deck, id: 100 + ++createdCount, name: input.name }),
   listGroups: async (userId: number) => groups.filter((group) => group.user_id === userId),
   createGroup: async (userId: number, name: string) => { const group = { id: 1, user_id: userId, name, deck_ids: [] as number[] }; groups.push(group); return group; },
   updateGroup: async (id: number, userId: number, patch: { name?: string; deck_ids?: number[] }) => { const group = groups.find((item) => item.id === id && item.user_id === userId); return group ? Object.assign(group, patch) : null; },
   deleteGroup: async (id: number, userId: number) => { const before = groups.length; groups = groups.filter((item) => item.id !== id || item.user_id !== userId); return groups.length < before; },
   findUserById: async () => ({ id: 1, username: "demo" }),
   canAccessDeck: async () => true,
-  findDeckById: async (id: number) => id === 7 ? { ...deck } : null,
+  findDeckById: async (id: number) => id === 7 || id === 8 ? { ...deck, id } : id === 9 ? { ...deck, id, source_lang: "es" } : null,
   updateDeck: async (_id: number, patch: Partial<Deck>) => Object.assign(deck, patch),
   listShares: async () => [],
   listUserDecks: async () => [{ ...deck, card_count: cards.length, is_owner: true }],
@@ -32,6 +41,7 @@ mock.module("./db", () => ({
   deleteCardsByIds: async (ids: number[]) => { cards = cards.filter((card) => !ids.includes(card.id)); },
 }));
 mock.module("./ai", () => ({
+  organizeWords: async (items: Card[]) => [{ name: "Greetings", reason: "Useful greetings", cardIds: items.map((card) => card.id) }],
   generateRule: async () => ({}),
   synthesizeSpeech: async () => new Uint8Array(64),
   generateCards: async ({ words }: { words: string[] }) => {
@@ -46,7 +56,7 @@ process.env.HOST = "127.0.0.1";
 const { server } = await import("./index");
 const base = `http://127.0.0.1:${server.port}`;
 afterAll(() => server.stop(true));
-beforeEach(() => { cards = [{ ...original }]; generatedWords = []; extractCalls = 0; groups = []; });
+beforeEach(() => { cards = [{ ...original }]; generatedWords = []; extractCalls = 0; groups = []; draft = null; copies = []; createdCount = 0; });
 
 function post(path: string, body: unknown) {
   return fetch(`${base}/api/decks/7/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -129,4 +139,48 @@ test("groups organize accessible sets and remain private to the owner", async ()
   expect((await send("/1", "DELETE", { userId: 2 })).status).toBe(404);
   expect((await send("/1", "DELETE", { userId: 1 })).status).toBe(200);
   expect(cards).toHaveLength(1);
+});
+
+function organization(path: string, body: unknown) {
+  return fetch(`${base}/api/organization/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+test("AI preview is read-only; rejecting creates no sets", async () => {
+  const preview = await (await organization("preview", { userId: 1, deckIds: [7], mode: "ai" })).json();
+  expect(preview.sets[0].words).toEqual(["bonjour"]);
+  expect(createdCount).toBe(0);
+  expect((await organization(`${preview.id}/reject`, { userId: 1 })).status).toBe(200);
+  expect((await organization(`${preview.id}/approve`, { userId: 1 })).status).toBe(409);
+  expect(copies).toHaveLength(0);
+});
+test("approval copies progress, preserves originals, and cannot apply twice", async () => {
+  const preview = await (await organization("preview", { userId: 1, deckIds: [7], mode: "ai" })).json();
+  expect((await organization(`${preview.id}/approve`, { userId: 2 })).status).toBe(404);
+  const first = await (await organization(`${preview.id}/approve`, { userId: 1 })).json();
+  const second = await (await organization(`${preview.id}/approve`, { userId: 1 })).json();
+  expect(first.deckIds).toEqual(second.deckIds);
+  expect(createdCount).toBe(1);
+  expect(copies[0].card.known_count).toBe(8);
+  expect(cards[0]).toEqual(original);
+});
+test("organization refuses invalid mode, missing sets, and a one-set merge", async () => {
+  expect((await organization("preview", { userId: 1, deckIds: [], mode: "ai" })).status).toBe(400);
+  expect((await organization("preview", { userId: 1, deckIds: [7], mode: "delete" })).status).toBe(400);
+  expect((await organization("preview", { userId: 1, deckIds: [7], mode: "merge" })).status).toBe(400);
+});
+
+test("merge previews duplicates and creates a single set only after approval", async () => {
+  const response = await organization("preview", { userId: 1, deckIds: [7, 8], mode: "merge", name: "Combined French" });
+  expect(response.status).toBe(200);
+  const preview = await response.json();
+  expect(preview.duplicates).toBe(1);
+  expect(preview.sets).toHaveLength(1);
+  expect(preview.sets[0].name).toBe("Combined French");
+  expect(createdCount).toBe(0);
+  expect((await organization(`${preview.id}/approve`, { userId: 1 })).status).toBe(200);
+  expect(copies).toHaveLength(1);
+  expect(cards).toHaveLength(1);
+});
+test("organization rejects inaccessible sets and mixed languages", async () => {
+  expect((await organization("preview", { userId: 1, deckIds: [7, 999], mode: "merge" })).status).toBe(403);
+  expect((await organization("preview", { userId: 1, deckIds: [7, 9], mode: "merge" })).status).toBe(400);
 });

@@ -1201,3 +1201,20 @@ h2 { font-size: 21px; }
 .group-membership summary { font-size: 12px; letter-spacing: 0; }
 .group-option { display: flex; align-items: center; gap: 8px; padding: 8px; color: var(--ink); overflow-wrap: anywhere; }
 .group-option input { flex-shrink: 0; }
+.library-organizer { margin: 24px 0; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.deck-sharing { padding: 0 22px 14px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.deck-recipients { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0; min-width: 0; }
+.deck-recipients li { padding: 4px 8px; border-radius: 6px; background: #eeecfb; color: var(--accent-dark); font-size: 12px; overflow-wrap: anywhere; max-width: 100%; }
+.library-organizer .row-head { flex-wrap: wrap; }
+.organizer-editor { margin-top: 20px; padding: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.organizer-editor > form + form { margin-top: 26px; }
+.organizer-editor .meta { line-height: 1.65; }
+.set-picker { padding: 0; border: 0; margin: 24px 0; max-height: 320px; overflow-y: auto; }
+.set-picker legend { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.set-picker label { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 14px; cursor: pointer; }
+.set-picker input { width: 18px; height: 18px; accent-color: var(--accent); flex-shrink: 0; }
+.set-picker small { display: block; color: var(--muted); margin-top: 5px; }
+.proposal { margin-top: 24px; }
+.proposal details { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.proposal-words { line-height: 1.8; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; }
+@media (max-width: 640px) { .organizer-editor { padding: 16px; } .library-organizer .row-head > .row { width: 100%; } }

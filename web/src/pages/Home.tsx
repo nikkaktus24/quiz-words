@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type Group } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
+import { LibraryOrganizer } from "../components/LibraryOrganizer";
 import { RenameName } from "../components/RenameName";
 import { getLangPrefs, saveLangPrefs } from "../lib/prefs";
 import { clearUser, getSavedUser } from "../session";
@@ -14,9 +15,7 @@ export function Home() {
   const [tab, setTab] = useState<"sets" | "rules">("sets");
   const [decks, setDecks] = useState<Deck[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [groupName, setGroupName] = useState("");
   const [groupId, setGroupId] = useState<number | null>(null);
-  const [groupBusy, setGroupBusy] = useState(false);
   const [ruleLanguage, setRuleLanguage] = useState(langs.targetLang);
   const [rules, setRules] = useState<Rule[]>([]);
   const [composer, setComposer] = useState<"set" | "rule" | "">("");
@@ -185,7 +184,9 @@ export function Home() {
     const names = shareNames.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean);
     if (!names.length) return;
     try {
-      await api.share(shareDeckId, me.id, names);
+      const data = await api.share(shareDeckId, me.id, names);
+      setDecks((current) => current.map((deck) => deck.id === shareDeckId ? { ...deck, shared_with: data.shared_with } : deck));
+      setError(data.missing.length ? `Could not find: ${data.missing.join(", ")}` : "");
       setShareDeckId(null);
       setShareNames("");
     } catch (err) { setError(err instanceof Error ? err.message : "Could not share set"); }
@@ -417,33 +418,14 @@ export function Home() {
 
       {tab === "sets" && (
         <>
-          <section className="panel groups-panel" aria-label="Set groups">
-            <div className="row-head"><div><h2>Groups</h2><p className="meta">Organize your sets and study a group together.</p></div></div>
-            <form className="row" onSubmit={async (event) => {
-              event.preventDefault(); if (!groupName.trim()) return; setGroupBusy(true); setError("");
-              try { const group = await api.createGroup(me.id, groupName.trim()); setGroups((current) => [...current, group]); setGroupName(""); setGroupId(group.id); }
-              catch (err) { setError(err instanceof Error ? err.message : "Could not create group"); } finally { setGroupBusy(false); }
-            }}>
-              <input className="field grow" aria-label="New group name" placeholder="New group name" maxLength={80} value={groupName} onChange={(event) => setGroupName(event.target.value)} />
-              <button className="ghost" disabled={groupBusy || !groupName.trim()}>Create group</button>
-            </form>
-            <div className="group-list">
-              <button className={`ghost ${groupId === null ? "on" : ""}`} onClick={() => setGroupId(null)}>All sets</button>
-              {groups.map((group) => <button key={group.id} className={`ghost ${groupId === group.id ? "on" : ""}`} onClick={() => setGroupId(group.id)}>{group.name} · {group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)).length}</button>)}
-            </div>
-            {groupId !== null && (() => { const group = groups.find((item) => item.id === groupId); if (!group) return null; const ids = group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)); return <div className="group-actions">
-              {ids.length > 0 && <Link className="primary" to={`/review/cards?ids=${ids.join(",")}`}>Study group</Link>}
-              <button className="ghost" onClick={async () => { const name = prompt("Rename group", group.name)?.trim(); if (!name || name === group.name) return; try { const updated = await api.updateGroup(group.id, me.id, { name }); setGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); } catch (err) { setError(err instanceof Error ? err.message : "Could not rename group"); } }}>Rename</button>
-              <button className="danger" onClick={async () => { if (!confirm(`Delete group “${group.name}”? Its sets will remain in your library.`)) return; try { await api.deleteGroup(group.id, me.id); setGroups((current) => current.filter((item) => item.id !== group.id)); setGroupId(null); } catch (err) { setError(err instanceof Error ? err.message : "Could not delete group"); } }}>Delete group</button>
-            </div>; })()}
-          </section>
+          <LibraryOrganizer decks={decks} groups={groups} userId={me.id} groupId={groupId} onGroup={setGroupId} onGroups={setGroups} onRefresh={async () => { const data = await api.userDecks(me.id); setDecks(data.decks); }} />
           <div className="terms-heading row-head">
             <h2>Your sets</h2>
             <div className="filter-group" aria-label="Filter sets">{([ ["all", "All sets"], ["mine", "Created by you"], ["shared", "Shared with you"] ] as const).map(([value, label]) => <button key={value} className={scope === value ? "on" : ""} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</div>
           </div>
           {loading && <p className="working-status" role="status"><span className="spinner tiny" aria-hidden />Opening your library…</p>}
           {!loading && decks.length === 0 && <div className="empty-state"><span className="empty-icon" aria-hidden>✧</span><h3>Your vocabulary journey starts here.</h3><p>Create a set, add a few words, and find your rhythm.</p><button className="primary" onClick={() => setComposer("set")}>Create your first set</button></div>}
-          {!loading && decks.length > 0 && visibleDecks.length === 0 && <div className="empty-state"><h3>No sets found</h3><p>{groupId !== null ? "Add sets to this group from All sets." : "Try a different search or filter."}</p><button className="ghost" onClick={() => { setQuery(""); setScope("all"); setGroupId(null); }}>Show all sets</button></div>}
+          {!loading && decks.length > 0 && visibleDecks.length === 0 && <div className="empty-state"><h3>No sets found</h3><p>{groupId !== null ? "Choose Manage groups to add sets to this group." : "Try a different search or filter."}</p><button className="ghost" onClick={() => { setQuery(""); setScope("all"); setGroupId(null); }}>Show all sets</button></div>}
           <div className="grid">
             {visibleDecks.map((d) => {
               const owner = d.is_owner !== false && !d.shared;
@@ -482,9 +464,21 @@ export function Home() {
                       {meta}
                     </Link>
                   )}
+                  {owner && (
+                    <div className="deck-sharing" aria-label="Sharing status" aria-live="polite">
+                      {d.shared_with?.length ? (
+                        <>
+                          <span className="meta">Shared with</span>
+                          <ul className="deck-recipients">
+                            {d.shared_with.map((person) => <li key={person.id}>@{person.username}</li>)}
+                          </ul>
+                        </>
+                      ) : <span className="meta">Only you</span>}
+                    </div>
+                  )}
                   {!picking && renamingId !== d.id && (
                     <div className="card-actions">
-                      {groups.length > 0 && <details className="card-menu group-membership"><summary>Groups</summary><div className="card-menu-items">{groups.map((group) => <label key={group.id} className="group-option"><input type="checkbox" checked={group.deck_ids.includes(d.id)} onChange={async (event) => { const availableIds = group.deck_ids.filter((id) => decks.some((deck) => deck.id === id)); const deckIds = event.target.checked ? [...availableIds, d.id] : availableIds.filter((id) => id !== d.id); try { const updated = await api.updateGroup(group.id, me.id, { deckIds }); setGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); } catch (err) { setError(err instanceof Error ? err.message : "Could not update group"); } }} />{group.name}</label>)}</div></details>}
+                      <span className="meta">{groups.filter((group) => group.deck_ids.includes(d.id)).map((group) => group.name).join(" · ")}</span>
                       {owner && <Link className="ghost add-words-link" to={`/decks/${d.id}?add=1`}>+ Add words</Link>}
                       <details className="card-menu"><summary aria-label={`Options for ${d.name}`}>•••</summary><div className="card-menu-items">
                       {owner && (

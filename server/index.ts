@@ -1,5 +1,6 @@
 import {
   addShare,
+  saveOrganizationDraft, findOrganizationDraft, claimOrganizationDraft, finishOrganizationDraft, copyStudyCard,
   listGroups, createGroup, updateGroup, deleteGroup,
   canAccessDeck,
   createDeck,
@@ -28,9 +29,11 @@ import {
   updateDeck,
   type Card,
 } from "./db";
-import { extractWordsFromImage, generateCards, generateRule, synthesizeSpeech } from "./ai";
+import { extractWordsFromImage, generateCards, generateRule, synthesizeSpeech, organizeWords } from "./ai";
 import { importFromSetUrl, parseImportPayload, type ImportedCard } from "./import";
 import { uniqueIncoming, wordKey } from "./words";
+
+import { uniqueStudyCards, validateBuckets } from "./organization";
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -143,6 +146,60 @@ export const server = Bun.serve({
         if (!user) return json({ error: "User not found" }, 404);
         const decks = await listUserDecks(userId);
         return json({ user, decks });
+      }
+
+      if (path === "/api/organization/preview" && method === "POST") {
+        const body = await readJson<{ userId: number; deckIds: number[]; mode: string; name?: string }>(req);
+        if (!body.userId || !(await findUserById(body.userId))) return bad("Valid userId required");
+        if (!Array.isArray(body.deckIds) || !body.deckIds.length || body.deckIds.length > 20 || body.deckIds.some((id) => !Number.isInteger(id) || id <= 0)) return bad("Choose 1–20 sets");
+        if (body.mode !== "merge" && body.mode !== "ai") return bad("Choose merge or ai");
+        const ids = [...new Set(body.deckIds)];
+        if (body.mode === "merge" && ids.length < 2) return bad("Choose at least two sets to merge");
+        const sources = [];
+        const incoming: Card[] = [];
+        for (const id of ids) {
+          const deck = await findDeckById(id);
+          if (!deck || !(await canAccessDeck(deck, body.userId))) return json({ error: "Set unavailable" }, 403);
+          sources.push(deck);
+          incoming.push(...await listCards(id));
+        }
+        const first = sources[0];
+        if (sources.some((deck) => deck.source_lang !== first.source_lang || deck.target_lang !== first.target_lang)) return bad("Choose sets with the same language pair");
+        const cards = uniqueStudyCards(incoming);
+        if (!cards.length || cards.length > 400) return bad("Choose sets containing 1–400 unique words");
+        const buckets = validateBuckets(body.mode === "ai" ? await organizeWords(cards) : [{ name: body.name?.trim() || "Merged set", reason: "Combined vocabulary; duplicates removed", cardIds: cards.map((card) => card.id) }], cards);
+        const draft = { id: crypto.randomUUID(), user_id: body.userId, status: "pending" as const, source_lang: first.source_lang, target_lang: first.target_lang, source_ids: ids, cards, buckets, created_at: new Date() };
+        await saveOrganizationDraft(draft);
+        return json({ id: draft.id, sets: buckets.map((bucket) => ({ name: bucket.name, reason: bucket.reason, words: bucket.cardIds.map((id) => cards.find((card) => card.id === id)!.word) })), duplicates: incoming.length - cards.length });
+      }
+      const organizationMatch = path.match(/^\/api\/organization\/([^/]+)\/(approve|reject)$/);
+      if (organizationMatch && method === "POST") {
+        const body = await readJson<{ userId: number }>(req);
+        const draft = await findOrganizationDraft(organizationMatch[1], body.userId);
+        if (!draft) return notFound();
+        if (organizationMatch[2] === "approve" && draft.status === "applied") return json({ deckIds: draft.result_ids || [] });
+        if (draft.status !== "pending") return json({ error: "This proposal has already been processed" }, 409);
+        for (const id of organizationMatch[2] === "approve" ? draft.source_ids : []) {
+          const deck = await findDeckById(id);
+          if (!deck || !(await canAccessDeck(deck, body.userId))) return json({ error: "Source set unavailable; generate a new proposal" }, 403);
+        }
+        const claimed = await claimOrganizationDraft(draft.id, body.userId, organizationMatch[2] === "approve" ? "applying" : "rejected");
+        if (!claimed) return json({ error: "This proposal has already been processed" }, 409);
+        if (organizationMatch[2] === "reject") return json({ deckIds: [] });
+        const resultIds: number[] = [];
+        try {
+          for (const bucket of draft.buckets) {
+            const deck = await createDeck({ userId: body.userId, name: bucket.name, sourceLang: draft.source_lang, targetLang: draft.target_lang });
+            resultIds.push(deck.id);
+            for (const id of bucket.cardIds) await copyStudyCard(deck.id, draft.cards.find((card) => card.id === id)!);
+          }
+          await finishOrganizationDraft(draft.id, "applied", resultIds);
+          return json({ deckIds: resultIds });
+        } catch (err) {
+          for (const id of resultIds) await deleteDeck(id);
+          await finishOrganizationDraft(draft.id, "failed", []);
+          throw err;
+        }
       }
 
       if (path === "/api/groups" && method === "GET") {

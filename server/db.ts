@@ -201,6 +201,22 @@ export async function listUserDecks(userId: number) {
         .toArray()
     : [];
   const countMap = new Map(counts.map((c) => [c._id, c.n]));
+  const ownedIds = docs.filter((deck) => deck.user_id === userId).map((deck) => deck.id);
+  const outgoing = ownedIds.length ? await shares.find({ deck_id: { $in: ownedIds } }).toArray() : [];
+  const recipientIds = [...new Set(outgoing.map((share) => share.user_id))];
+  const recipients = recipientIds.length ? await users.find({ id: { $in: recipientIds } }).toArray() : [];
+  const recipientMap = new Map(recipients.map((person) => [person.id, person.username]));
+  const sharedByDeck = new Map<number, { id: number; username: string }[]>();
+  for (const share of outgoing) {
+    const username = recipientMap.get(share.user_id);
+    if (!username) continue;
+    const people = sharedByDeck.get(share.deck_id) || [];
+    people.push({ id: share.user_id, username });
+    sharedByDeck.set(share.deck_id, people);
+  }
+  for (const people of sharedByDeck.values()) {
+    people.sort((a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: "base" }));
+  }
   return docs.map((d) => {
     const shared = d.user_id !== userId;
     return {
@@ -208,6 +224,7 @@ export async function listUserDecks(userId: number) {
       owner_username: ownerMap.get(d.user_id),
       shared,
       is_owner: !shared,
+      ...(!shared ? { shared_with: sharedByDeck.get(d.id) || [] } : {}),
       card_count: countMap.get(d.id) ?? 0,
     } satisfies Deck;
   });
@@ -559,4 +576,24 @@ export async function updateGroup(id: number, userId: number, patch: { name?: st
 }
 export async function deleteGroup(id: number, userId: number) {
   return (await groups.deleteOne({ id, user_id: userId })).deletedCount > 0;
+}
+
+export type OrganizationDraft = {
+  id: string; user_id: number; status: "pending" | "applying" | "applied" | "rejected" | "failed";
+  source_lang: string; target_lang: string; source_ids: number[]; cards: Card[];
+  buckets: import("./organization").Bucket[]; result_ids?: number[]; created_at: Date;
+};
+const drafts = database.collection<OrganizationDraft>("organization_drafts");
+await drafts.createIndex({ id: 1 }, { unique: true });
+await drafts.createIndex({ created_at: 1 }, { expireAfterSeconds: 86400 });
+export async function saveOrganizationDraft(draft: OrganizationDraft) { await drafts.insertOne(draft); }
+export async function findOrganizationDraft(id: string, userId: number) { return drafts.findOne({ id, user_id: userId }); }
+export async function claimOrganizationDraft(id: string, userId: number, status: "applying" | "rejected") {
+  return drafts.findOneAndUpdate({ id, user_id: userId, status: "pending" }, { $set: { status } }, { returnDocument: "after" });
+}
+export async function finishOrganizationDraft(id: string, status: "applied" | "failed", resultIds: number[]) {
+  await drafts.updateOne({ id }, { $set: { status, result_ids: resultIds } });
+}
+export async function copyStudyCard(deckId: number, card: Card) {
+  await cards.insertOne({ ...card, id: await nextId("cards"), deck_id: deckId, word_lc: wordKey(card.word) });
 }
