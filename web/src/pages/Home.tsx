@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type Group } from "../api";
 import { ImportPanel, type ImportSubmit } from "../components/ImportPanel";
 import { LibraryOrganizer } from "../components/LibraryOrganizer";
+import { SetActions } from "../components/SetActions";
 import { RenameName } from "../components/RenameName";
 import { getLangPrefs, saveLangPrefs } from "../lib/prefs";
 import { clearUser, getSavedUser } from "../session";
@@ -480,38 +481,11 @@ export function Home() {
                     <div className="card-actions">
                       <span className="meta">{groups.filter((group) => group.deck_ids.includes(d.id)).map((group) => group.name).join(" · ")}</span>
                       {owner && <Link className="ghost add-words-link" to={`/decks/${d.id}?add=1`}>+ Add words</Link>}
-                      <details className="card-menu"><summary aria-label={`Options for ${d.name}`}>•••</summary><div className="card-menu-items">
-                      {owner && (
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            setRenamingId(d.id);
-                            setShareDeckId(null);
-                          }}
-                        >
-                          Rename
-                        </button>
-                      )}
-                      {owner && (
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            setShareDeckId(shareDeckId === d.id ? null : d.id);
-                            setShareNames("");
-                          }}
-                        >
-                          Share
-                        </button>
-                      )}
-                      {owner && (
-                        <button type="button" className="danger" onClick={() => void removeDeck(d)}>
-                          Delete
-                        </button>
-                      )}
-                      {!owner && <span className="meta">Shared by {d.owner_username}</span>}
-                      </div></details>
+                      {owner && <SetActions name={d.name} actions={[
+                        { label: "Rename", onSelect: () => { setRenamingId(d.id); setShareDeckId(null); } },
+                        { label: "Share", onSelect: () => { setShareDeckId(shareDeckId === d.id ? null : d.id); setShareNames(""); } },
+                        { label: "Delete", danger: true, onSelect: () => { void removeDeck(d); } },
+                      ]} />}
                     </div>
                   )}
                   {shareDeckId === d.id && !picking && (
